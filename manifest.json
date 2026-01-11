@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Moxfield Extended",
+  "version": "0.1.0",
+  "description": "Enhance Moxfield with section-level shortcuts, price visualization, and multi-select",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://moxfield.com/*"
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/serviceWorker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://moxfield.com/decks/*"
+      ],
+      "js": [
+        "src/utils/storage.js",
+        "src/utils/messaging.js",
+        "src/content/domHelpers.js",
+        "src/content/sectionShortcuts.js",
+        "src/content/priceVisualization.js",
+        "src/content/index.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moxfield Extended</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <h1>Moxfield Extended</h1>
+      <span class="version">v0.1.0</span>
+    </header>
+    
+    <main class="popup-content">
+      <div class="setting-group">
+        <h2>Features</h2>
+        
+        <label class="toggle-setting">
+          <span class="setting-label">
+            <strong>Section Shortcuts</strong>
+            <small>Bulk actions on section headers</small>
+          </span>
+          <input type="checkbox" id="sectionShortcutsEnabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+        
+        <label class="toggle-setting">
+          <span class="setting-label">
+            <strong>Price Visualization</strong>
+            <small>Show cost distribution bars</small>
+          </span>
+          <input type="checkbox" id="priceVisualizationEnabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+        
+        <label class="toggle-setting">
+          <span class="setting-label">
+            <strong>Multi-Select</strong>
+            <small>Select multiple cards for actions</small>
+          </span>
+          <input type="checkbox" id="multiSelectEnabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      
+      <div class="shortcut-info">
+        <h2>Shortcuts</h2>
+        <ul>
+          <li><kbd>Alt+1-4</kbd> Move cards between boards</li>
+          <li><kbd>Ctrl+Shift+P</kbd> Toggle price bars</li>
+          <li><kbd>Escape</kbd> Clear selection</li>
+        </ul>
+      </div>
+    </main>
+    
+    <footer class="popup-footer">
+      <a href="https://moxfield.com" target="_blank" rel="noopener">Open Moxfield</a>
+    </footer>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
