@@ -16,8 +16,8 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   let isDeckWideMode = false; // false = section %, true = deck %
   let budgetGoal = null;      // null = use actual deck cost, number = budget target
   let styleElement = null;
-  let indicatorElement = null;
   let keydownHandler = null;
+  let initEpoch = 0;          // bumped by init/cleanup; a stale restore is dropped
 
   // Toggle shortcuts
   const TOGGLE_KEY = 'p'; // Alt+P toggles on/off, Alt+Shift+P switches mode
@@ -30,8 +30,17 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     const deckId = window.MoxfieldExtended.domHelpers.getDeckId();
     if (!deckId) return null;
 
-    const stored = localStorage.getItem(`mox-budget-${deckId}`);
-    return stored ? parseFloat(stored) : null;
+    const stored = parseFloat(localStorage.getItem(`mox-budget-${deckId}`));
+    return isValidBudget(stored) ? stored : null;
+  }
+
+  /**
+   * Whether a value is a usable budget goal: a finite number above zero.
+   * @param {*} value
+   * @returns {boolean}
+   */
+  function isValidBudget(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
   }
 
   /**
@@ -50,39 +59,112 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   }
 
   /**
-   * Prompt user to set a budget goal
+   * Tell the badge and settings popover that price state changed. They listen
+   * on deckSettings' change event.
    */
-  function promptBudgetGoal() {
-    const currentBudget = budgetGoal !== null ? `$${budgetGoal.toFixed(2)}` : 'not set (using actual deck cost)';
-    const input = prompt(
-      `Set budget goal for this deck.\n\nCurrent: ${currentBudget}\n\nEnter a dollar amount (e.g., 100) or leave empty to use actual deck cost:`,
-      budgetGoal !== null ? budgetGoal.toString() : ''
+  function notifyChange() {
+    window.MoxfieldExtended.deckSettings?.events?.dispatchEvent(
+      new CustomEvent('change', { detail: { source: 'price' } })
     );
+  }
 
-    if (input === null) return; // Cancelled
+  /**
+   * Whether the viewer's Moxfield Price view option is on, so rows show prices.
+   * @returns {boolean}
+   */
+  function isPriceAvailable() {
+    return Boolean(window.MoxfieldExtended?.domHelpers?.isPriceEnabled());
+  }
 
-    if (input.trim() === '') {
-      // Clear budget
-      budgetGoal = null;
-      saveBudgetGoal(null);
-      console.log(LOG_PREFIX, 'Budget goal cleared, using actual deck cost');
-    } else {
-      const parsed = parseFloat(input.replace(/[$,]/g, ''));
-      if (!isNaN(parsed) && parsed > 0) {
-        budgetGoal = parsed;
-        saveBudgetGoal(parsed);
-        console.log(LOG_PREFIX, `Budget goal set to $${parsed.toFixed(2)}`);
-      } else {
-        alert('Invalid budget. Please enter a positive number.');
-        return;
-      }
-    }
-
-    // Refresh visualization with new budget
-    if (isActive && isDeckWideMode) {
+  /**
+   * Apply or remove the bars to match the current state. Goldfish mode shows none.
+   */
+  function syncBars() {
+    if (isActive && !window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
       applyVisualization();
-      showIndicator();
+    } else {
+      removeVisualization();
     }
+  }
+
+  /**
+   * After a state change: update the bars, persist, and notify listeners.
+   */
+  function commit() {
+    syncBars();
+    saveActiveState(isActive, isDeckWideMode);
+    notifyChange();
+  }
+
+  /**
+   * The current price-bar state.
+   * @returns {{active: boolean, deckWide: boolean, budget: number|null}}
+   */
+  function getState() {
+    return { active: isActive, deckWide: isDeckWideMode, budget: budgetGoal };
+  }
+
+  /**
+   * Turn the bars on or off, keeping the mode. Turning on needs the viewer's
+   * Moxfield Price option. No-op before init or when nothing changes.
+   * @param {boolean} on
+   */
+  function setActive(on) {
+    if (!isInitialized) return;
+    const next = Boolean(on);
+    if (next === isActive) return;
+    if (next && !isPriceAvailable()) return;
+    isActive = next;
+    commit();
+  }
+
+  /**
+   * Choose Deck % (true) or Section % (false). Works while off, so the next
+   * turn-on uses it. No-op before init or when nothing changes.
+   * @param {boolean} deckWide
+   */
+  function setDeckWide(deckWide) {
+    if (!isInitialized) return;
+    const next = Boolean(deckWide);
+    if (next === isDeckWideMode) return;
+    isDeckWideMode = next;
+    commit();
+  }
+
+  /**
+   * Badge cycle: Section % → Deck % → Off → Section % (spec 5.1). Turning on
+   * always lands in Section mode. No-op when Moxfield Price is off.
+   */
+  function cycle() {
+    if (!isInitialized || !isPriceAvailable()) return;
+
+    if (!isActive) {
+      isActive = true;
+      isDeckWideMode = false;
+    } else if (!isDeckWideMode) {
+      isDeckWideMode = true;
+    } else {
+      isActive = false;
+    }
+    console.log(LOG_PREFIX, `Price visualization: ${isActive ? (isDeckWideMode ? 'deck-wide' : 'per-section') : 'OFF'}`);
+    commit();
+  }
+
+  /**
+   * Set this deck's budget goal, the Deck-mode denominator. null, or anything
+   * that is not a finite number above zero, clears it (actual deck cost is
+   * used). Stored in page localStorage under mox-budget-<deckId>.
+   * @param {number|null} budget
+   */
+  function setBudgetGoal(budget) {
+    const next = isValidBudget(budget) ? budget : null;
+    saveBudgetGoal(next);
+    if (next === budgetGoal) return;
+
+    budgetGoal = next;
+    console.log(LOG_PREFIX, next === null ? 'Budget goal cleared, using actual deck cost' : `Budget goal set to $${next.toFixed(2)}`);
+    if (isInitialized && isActive && isDeckWideMode) syncBars();
+    notifyChange();
   }
 
   /**
@@ -111,20 +193,20 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
     isInitialized = true;
 
-    // Check if visualization was previously active and restore state
+    // Restore the stored on/off state and mode, then tell the badge
+    const epoch = ++initEpoch;
     loadActiveState().then((state) => {
-      if (state.active) {
-        isActive = true;
-        isDeckWideMode = state.deckWide || false;
+      if (epoch !== initEpoch) return; // cleaned up (or re-inited) meanwhile
 
-        // Only apply if not in goldfish mode
-        if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-          applyVisualization();
-          showIndicator();
-        } else {
-          console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
-        }
+      isActive = Boolean(state.active);
+      isDeckWideMode = Boolean(state.deckWide);
+
+      // Only apply if not in goldfish mode
+      if (isActive && window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
+        console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
       }
+      syncBars();
+      notifyChange();
     });
 
     console.log(LOG_PREFIX, 'Price visualization initialized');
@@ -138,10 +220,12 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
     console.log(LOG_PREFIX, 'Cleaning up price visualization');
 
+    initEpoch += 1;
+    const wasActive = isActive;
+
     // Remove visualization if active
     if (isActive) {
       removeVisualization();
-      hideIndicator();
     }
 
     // Remove styles
@@ -155,6 +239,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
     isActive = false;
     isInitialized = false;
+    if (wasActive) notifyChange();
   }
 
   /**
@@ -173,20 +258,12 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     isActive = !isActive;
     console.log(LOG_PREFIX, `Price visualization: ${isActive ? 'ON' : 'OFF'} (${isDeckWideMode ? 'deck-wide' : 'per-section'})`);
 
-    if (isActive) {
-      if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-        applyVisualization();
-        showIndicator();
-      } else {
-        console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
-      }
-    } else {
-      removeVisualization();
-      hideIndicator();
+    if (isActive && window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
+      console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
     }
 
-    // Persist state
-    saveActiveState(isActive, isDeckWideMode);
+    // Apply or remove, persist state, notify the badge
+    commit();
   }
 
   /**
@@ -207,11 +284,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
       isDeckWideMode = true;
       isActive = true;
-      if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-        applyVisualization();
-        showIndicator();
-      }
-      saveActiveState(isActive, isDeckWideMode);
+      commit();
       console.log(LOG_PREFIX, 'Price visualization: ON (deck-wide)');
       return;
     }
@@ -220,14 +293,8 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     isDeckWideMode = !isDeckWideMode;
     console.log(LOG_PREFIX, `Price visualization mode: ${isDeckWideMode ? 'deck-wide' : 'per-section'}`);
 
-    // Re-apply with new mode
-    if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-      applyVisualization();
-      showIndicator();
-    }
-
-    // Persist state
-    saveActiveState(isActive, isDeckWideMode);
+    // Re-apply with new mode, persist state, notify the badge
+    commit();
   }
 
   /**
@@ -236,15 +303,10 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   function refresh() {
     if (!isInitialized || !isActive) return;
 
-    // Re-apply visualization to catch new/updated cards
-    // Re-apply visualization to catch new/updated cards
-    if (window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-      removeVisualization();
-      hideIndicator();
-    } else {
-      applyVisualization();
-      showIndicator();
-    }
+    // Re-apply visualization to catch new/updated cards; goldfish shows none.
+    // Bars are class and style writes only, never childList, so the observer
+    // in index.js does not refresh again.
+    syncBars();
   }
 
   /**
@@ -255,6 +317,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
     styleElement = document.createElement('style');
     styleElement.id = 'mox-price-visualization-styles';
+    styleElement.setAttribute('data-mox', '');
     styleElement.textContent = `
       /* Price bar visualization */
       .mox-price-bar {
@@ -307,47 +370,6 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
         position: relative;
         z-index: 1;
       }
-
-      /* Mode indicator badge */
-      .mox-price-mode-indicator {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: rgba(30, 30, 30, 0.9);
-        color: #fff;
-        padding: 8px 14px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 500;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        z-index: 99999;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        transition: opacity 0.2s ease, transform 0.15s ease;
-        cursor: pointer;
-        user-select: none;
-      }
-
-      .mox-price-mode-indicator:hover {
-        transform: scale(1.02);
-        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
-      }
-
-      .mox-price-mode-indicator::before {
-        content: '📊';
-        font-size: 14px;
-      }
-
-      .mox-price-mode-indicator.mox-deck-mode {
-        border-color: rgba(59, 130, 246, 0.4);
-      }
-
-      .mox-price-mode-indicator.mox-section-mode {
-        border-color: rgba(34, 197, 94, 0.4);
-      }
     `;
     document.head.appendChild(styleElement);
   }
@@ -359,60 +381,6 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     if (styleElement) {
       styleElement.remove();
       styleElement = null;
-    }
-  }
-
-  /**
-   * Show/update the mode indicator badge
-   */
-  function showIndicator() {
-    if (!indicatorElement) {
-      indicatorElement = document.createElement('div');
-      indicatorElement.className = 'mox-price-mode-indicator';
-      document.body.appendChild(indicatorElement);
-    }
-
-    // Update text and style based on mode
-    if (isDeckWideMode) {
-      if (budgetGoal !== null) {
-        indicatorElement.textContent = `Price: Budget $${budgetGoal.toFixed(0)}`;
-      } else {
-        indicatorElement.textContent = 'Price: Deck %';
-      }
-      indicatorElement.classList.remove('mox-section-mode');
-      indicatorElement.classList.add('mox-deck-mode');
-    } else {
-      indicatorElement.textContent = 'Price: Section %';
-      indicatorElement.classList.remove('mox-deck-mode');
-      indicatorElement.classList.add('mox-section-mode');
-    }
-
-    // Left-click to switch modes
-    indicatorElement.onclick = switchMode;
-
-    // Right-click to set budget (only in deck-wide mode)
-    indicatorElement.oncontextmenu = (e) => {
-      e.preventDefault();
-      if (isDeckWideMode) {
-        promptBudgetGoal();
-      } else {
-        // Switch to deck mode first, then prompt
-        isDeckWideMode = true;
-        applyVisualization();
-        showIndicator();
-        saveActiveState(isActive, isDeckWideMode);
-        promptBudgetGoal();
-      }
-    };
-  }
-
-  /**
-   * Hide the mode indicator badge
-   */
-  function hideIndicator() {
-    if (indicatorElement) {
-      indicatorElement.remove();
-      indicatorElement = null;
     }
   }
 
@@ -494,16 +462,17 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
           percentage = sectionTotal > 0 ? (total / sectionTotal) * 100 : 0;
         }
 
-        // Add price bar class and set CSS variable
-        element.classList.add('mox-price-bar');
-        if (isDeckWideMode) {
-          element.classList.add('mox-deck-wide');
+        // Add price bar class and set CSS variable. toggle() and the value
+        // check write nothing when unchanged, so a steady-state refresh is quiet.
+        element.classList.toggle('mox-price-bar', true);
+        element.classList.toggle('mox-deck-wide', isDeckWideMode);
+        const width = `${percentage}%`;
+        if (element.style.getPropertyValue('--mox-price-percentage') !== width) {
+          element.style.setProperty('--mox-price-percentage', width);
         }
-        element.style.setProperty('--mox-price-percentage', `${percentage}%`);
 
         // Add warning classes for high-cost cards
         // Dynamic fair-share thresholds with minimum floors
-        element.classList.remove('mox-price-high', 'mox-price-critical');
 
         // Fair share based on section (section mode) or deck (deck-wide mode)
         const relevantCount = isDeckWideMode ? deckCardCount : cardCount;
@@ -513,11 +482,9 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
         const highThreshold = Math.max(10, fairShare * 1.25);      // 1.25× fair share, min 10%
         const criticalThreshold = Math.max(15, fairShare * 1.75);  // 1.75× fair share, min 15%
 
-        if (percentage > criticalThreshold) {
-          element.classList.add('mox-price-critical');
-        } else if (percentage > highThreshold) {
-          element.classList.add('mox-price-high');
-        }
+        const critical = percentage > criticalThreshold;
+        element.classList.toggle('mox-price-critical', critical);
+        element.classList.toggle('mox-price-high', !critical && percentage > highThreshold);
 
         totalCards++;
       });
@@ -582,6 +549,11 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
       toggle,
       switchMode,
       refresh,
+      getState,
+      cycle,
+      setActive,
+      setDeckWide,
+      setBudgetGoal,
     };
   }
 })();
