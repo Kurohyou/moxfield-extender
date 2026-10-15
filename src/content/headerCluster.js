@@ -29,8 +29,6 @@
   const HEADER = 'section.deckview article > ul > li:has(> .mox-cluster)';
   const CSS = `
 ${HEADER} {
-  display: flex;
-  align-items: center;
   min-width: 0;
 }
 ${HEADER} > a.table-deck-row-link {
@@ -45,6 +43,7 @@ ${HEADER} > span.text-nowrap.fw-normal {
 }
 .mox-cluster {
   margin-left: auto;
+  align-self: center;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -59,13 +58,13 @@ ${HEADER} > span.text-nowrap.fw-normal {
 .mox-cluster[data-layout="hidden"] {
   display: none;
 }
-.mox-cluster[data-measure][data-measure] {
+.mox-cluster[data-measure] {
   display: inline-flex !important;
 }
-.mox-cluster[data-measure][data-measure] > .mox-odds {
+.mox-cluster[data-measure] > .mox-odds {
   display: inline !important;
 }
-.mox-cluster[data-measure][data-measure] > .mox-curve {
+.mox-cluster[data-measure] > .mox-curve {
   display: inline-flex !important;
 }
 `;
