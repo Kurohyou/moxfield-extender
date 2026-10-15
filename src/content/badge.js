@@ -235,12 +235,21 @@
   }
 
   /**
+   * Redraw the badge, then the settings popover if it is open, so both follow
+   * every settings change: optimistic, rolled back, or merged by index.js.
+   */
+  function render() {
+    draw();
+    ns().settingsPopover?.render?.();
+  }
+
+  /**
    * Draw the badge from current state. Idempotent: writes only what changed,
-   * so a second render with nothing new makes no DOM mutations. Removes the
+   * so a second draw with nothing new makes no DOM mutations. Removes the
    * badge in goldfish mode or when every feature is off. Does nothing before
    * init() or after cleanup().
    */
-  function render() {
+  function draw() {
     if (!initialized) return;
     const { domHelpers, priceVisualization, deckSettings } = ns();
     if (!domHelpers) return;
@@ -303,24 +312,37 @@
   }
 
   /**
-   * Flip a global feature toggle. Updates state.settings at once and redraws,
+   * Set a global feature toggle. Updates state.settings at once and redraws,
    * then writes chrome.storage.sync; index.js's onChanged listener merges the
    * same value and re-runs initFeatures, as for the popup. A failed write
    * (e.g. the sync quota) rolls the optimistic value back and redraws.
+   * Does nothing when the value is unchanged. Shared by the badge, Alt+O /
+   * Alt+M and the settings popover.
    * @param {string} key - A storage.DEFAULT_SETTINGS key
+   * @param {boolean} value
    */
-  function toggleSetting(key) {
+  function setFeature(key, value) {
     const { state, storage } = ns();
-    const next = !currentSettings()[key];
+    const prev = Boolean(currentSettings()[key]);
+    const next = Boolean(value);
+    if (next === prev) return;
     if (state?.settings) state.settings[key] = next;
     render();
     Promise.resolve(storage?.setSetting(key, next)).catch((error) => {
       console.warn(LOG_PREFIX, `Couldn't save ${key}`, error);
       const settings = ns().state?.settings;
       // Leave it alone if something has changed it again since.
-      if (settings && settings[key] === next) settings[key] = !next;
+      if (settings && settings[key] === next) settings[key] = prev;
       render();
     });
+  }
+
+  /**
+   * Flip a global feature toggle (see setFeature).
+   * @param {string} key - A storage.DEFAULT_SETTINGS key
+   */
+  function toggleSetting(key) {
+    setFeature(key, !currentSettings()[key]);
   }
 
   /**
@@ -432,6 +454,7 @@
       init,
       cleanup,
       render,
+      setFeature,
     };
   }
 })();

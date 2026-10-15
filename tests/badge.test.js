@@ -671,3 +671,45 @@ describe('render', () => {
     window.MoxfieldExtended.priceVisualization = price;
   });
 });
+
+describe('setFeature', () => {
+  it('sets a global toggle, redraws and writes sync storage', async () => {
+    badge.setFeature('sectionCurveEnabled', false);
+    expect(window.MoxfieldExtended.state.settings.sectionCurveEnabled).toBe(
+      false
+    );
+    expect(struck('curve')).toBe(true);
+    expect((await synced(['sectionCurveEnabled'])).sectionCurveEnabled).toBe(
+      false
+    );
+  });
+
+  it('does nothing when the value is unchanged', async () => {
+    badge.setFeature('sectionOddsEnabled', true);
+    await settle();
+    expect(await synced(['sectionOddsEnabled'])).toEqual({});
+  });
+
+  it('rolls back to the previous value when the write fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    chrome.storage.sync.__failNextWrite();
+    badge.setFeature('sectionOddsEnabled', false);
+    expect(struck('odds')).toBe(true);
+    await settle();
+    expect(window.MoxfieldExtended.state.settings.sectionOddsEnabled).toBe(
+      true
+    );
+    expect(struck('odds')).toBe(false);
+  });
+
+  it('asks an open settings popover to redraw on every render', () => {
+    const render = vi.fn();
+    window.MoxfieldExtended.settingsPopover = { render };
+    badge.setFeature('sectionOddsEnabled', false);
+    expect(render).toHaveBeenCalled();
+    render.mockClear();
+    settings(ALL_OFF);
+    badge.render(); // hidden: the popover still hears about it
+    expect(render).toHaveBeenCalled();
+  });
+});
