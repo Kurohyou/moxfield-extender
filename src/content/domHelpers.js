@@ -65,6 +65,16 @@
   }
 
   /**
+   * Whether a deck view is on the page. isDeckPage() also matches list pages
+   * such as /decks/public, and the content script outlives client-side
+   * navigation, so features that need a deck check this on every refresh.
+   * @returns {boolean}
+   */
+  function isDeckView() {
+    return document.querySelector('section.deckview') !== null;
+  }
+
+  /**
    * Get the current deck ID from the URL
    * @returns {string|null} Deck ID or null if not on a deck page
    */
@@ -344,6 +354,7 @@
       SPECIAL_BOARD_TITLES,
       isDeckPage,
       isGoldfishMode,
+      isDeckView,
       getDeckId,
       getSectionHeaders,
       getCardsInSection,

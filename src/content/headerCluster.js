@@ -510,7 +510,13 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
     const odds = Boolean(settings.sectionOddsEnabled);
     const curveOn = Boolean(settings.sectionCurveEnabled);
 
-    if (domHelpers.isGoldfishMode() || (!odds && !curveOn)) {
+    // No deck view (e.g. /decks/public after client-side navigation) is
+    // treated like goldfish: nothing to show, and no deck to load.
+    if (
+      domHelpers.isGoldfishMode() ||
+      !domHelpers.isDeckView() ||
+      (!odds && !curveOn)
+    ) {
       removeClusters();
       sectionOdds.cleanup();
       sectionCurve.cleanup();

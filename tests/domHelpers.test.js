@@ -51,3 +51,12 @@ describe('SELECTORS.sectionHeader', () => {
     expect(document.querySelectorAll(domHelpers.SELECTORS.sectionHeader)).toHaveLength(1);
   });
 });
+
+describe('isDeckView', () => {
+  it('is true only while a deck view is on the page', () => {
+    buildDeck({ sections: [{ title: 'Creatures', rows: [{ qty: 1 }] }] });
+    expect(domHelpers.isDeckView()).toBe(true);
+    document.body.innerHTML = '<main><div class="deck-tile"></div></main>';
+    expect(domHelpers.isDeckView()).toBe(false);
+  });
+});

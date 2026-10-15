@@ -15,6 +15,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   let isActive = false;
   let isDeckWideMode = false; // false = section %, true = deck %
   let budgetGoal = null;      // null = use actual deck cost, number = budget target
+  let budgetDeckId = null;    // the deck budgetGoal was loaded for
   let styleElement = null;
   let keydownHandler = null;
   let initEpoch = 0;          // bumped by init/cleanup; a stale restore is dropped
@@ -193,6 +194,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     injectStyles();
 
     // Load budget goal for this deck
+    budgetDeckId = window.MoxfieldExtended.domHelpers.getDeckId();
     budgetGoal = loadBudgetGoal();
     if (budgetGoal) {
       console.log(LOG_PREFIX, `Loaded budget goal: $${budgetGoal.toFixed(2)}`);
@@ -294,12 +296,34 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
    * Refresh visualization (e.g., after DOM changes)
    */
   function refresh() {
-    if (!isInitialized || !isActive) return;
+    if (!isInitialized) return;
+
+    // Moxfield navigates client-side, so the deck may have changed since
+    // init: load the new deck's budget, even while the bars are off, so the
+    // badge and settings popover show the right one.
+    const rekeyed = rekeyBudget();
 
     // Re-apply visualization to catch new/updated cards; goldfish shows none.
     // Bars are class and style writes only, never childList, so the observer
     // in index.js does not refresh again.
-    syncBars();
+    if (isActive) syncBars();
+    if (rekeyed) notifyChange();
+  }
+
+  /**
+   * Reload the budget goal when the page's deck differs from the one it was
+   * loaded for.
+   * @returns {boolean} Whether the budget goal changed
+   */
+  function rekeyBudget() {
+    const deckId = window.MoxfieldExtended.domHelpers.getDeckId();
+    if (deckId === budgetDeckId) return false;
+    budgetDeckId = deckId;
+    const next = loadBudgetGoal();
+    if (next === budgetGoal) return false;
+    budgetGoal = next;
+    console.log(LOG_PREFIX, next === null ? 'No budget goal for this deck' : `Loaded budget goal: $${next.toFixed(2)}`);
+    return true;
   }
 
   /**

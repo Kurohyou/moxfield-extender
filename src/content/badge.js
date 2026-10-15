@@ -265,6 +265,7 @@
     const curveOn = Boolean(settings.sectionCurveEnabled);
     const visible =
       !domHelpers.isGoldfishMode() &&
+      domHelpers.isDeckView() &&
       ((priceEnabled && price.active) || oddsOn || curveOn);
 
     if (!visible) {
@@ -407,7 +408,10 @@
     if (!key || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
       return;
     }
-    if (ns().domHelpers?.isEditableTarget(event.target)) return;
+    const { domHelpers } = ns();
+    if (domHelpers?.isEditableTarget(event.target)) return;
+    // Off a deck view (e.g. /decks/public) the keys belong to the page.
+    if (domHelpers && !domHelpers.isDeckView()) return;
 
     event.preventDefault();
     event.stopPropagation();

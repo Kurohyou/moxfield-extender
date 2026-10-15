@@ -471,6 +471,104 @@ describe('content index Section odds wiring', () => {
     expect(document.querySelector('.mox-badge')).not.toBeNull();
   });
 
+  /**
+   * Press Alt+O on the page.
+   * @returns {KeyboardEvent} The dispatched event
+   */
+  function pressAltO() {
+    const event = new KeyboardEvent('keydown', {
+      code: 'KeyO',
+      key: 'o',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(event);
+    return event;
+  }
+
+  it('stays out of a /decks/ page that is not a deck view', async () => {
+    await loadContent({ path: '/decks/public' });
+    document.body.innerHTML = '<main><div class="deck-tile">A deck</div></main>';
+    await settle();
+    useFakeTimeouts();
+    const ensureLoaded = vi.spyOn(
+      window.MoxfieldExtended.deckSettings,
+      'ensureLoaded'
+    );
+    document.body.appendChild(document.createElement('div'));
+    await runObserverDebounce();
+
+    expect(document.querySelector('.mox-badge')).toBeNull();
+    expect(document.querySelector('.mox-cluster')).toBeNull();
+    expect(ensureLoaded).not.toHaveBeenCalled();
+
+    const event = pressAltO();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(event.defaultPrevented).toBe(false);
+    expect(window.MoxfieldExtended.state.settings.sectionOddsEnabled).toBe(true);
+    expect(document.querySelector('.mox-badge')).toBeNull();
+  });
+
+  it('removes everything after client-side navigation away from a deck, and restores it on return', async () => {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(document.querySelector('.mox-cluster')).not.toBeNull()
+    );
+    expect(document.querySelector('.mox-badge')).not.toBeNull();
+    useFakeTimeouts();
+
+    window.history.pushState({}, '', '/decks/public');
+    document.querySelector('section.deckview').remove();
+    await runObserverDebounce();
+
+    expect(document.querySelector('.mox-cluster')).toBeNull();
+    expect(document.querySelector('.mox-badge')).toBeNull();
+    expect(pressAltO().defaultPrevented).toBe(false);
+
+    window.history.pushState({}, '', '/decks/abc');
+    buildStandardDeck();
+    await runObserverDebounce();
+
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-cluster')).not.toBeNull()
+    );
+    expect(document.querySelector('.mox-badge')).not.toBeNull();
+  });
+
+  it('re-keys deck settings and the price budget on client-side deck change', async () => {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+    );
+    await settle();
+    const { oddsMath, priceVisualization } = window.MoxfieldExtended;
+    const t5 = oddsMath.evaluate({ N: 99, K: 30, turns: 5, k: 1 }).label;
+    expect(header('Creatures').querySelector('.mox-odds').textContent).not.toBe(t5);
+    expect(priceVisualization.getState().budget).toBeNull();
+
+    await chrome.storage.local.set({ 'deck:xyz': { turns: 5 } });
+    localStorage.setItem('mox-budget-xyz', '250');
+    try {
+      useFakeTimeouts();
+      window.history.pushState({}, '', '/decks/xyz');
+      buildStandardDeck();
+      await runObserverDebounce();
+
+      await vi.waitFor(() =>
+        expect(header('Creatures').querySelector('.mox-odds').textContent).toBe(
+          t5
+        )
+      );
+      expect(
+        document.querySelector('.mox-badge [data-seg="odds"]').textContent
+      ).toContain('T5');
+      expect(priceVisualization.getState().budget).toBe(250);
+    } finally {
+      localStorage.removeItem('mox-budget-xyz');
+    }
+  });
+
   it('never writes chrome.storage.sync from initFeatures or a refresh', async () => {
     await loadContent({ deck: true });
     await settle();
