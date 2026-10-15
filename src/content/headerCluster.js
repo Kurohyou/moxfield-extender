@@ -23,6 +23,10 @@
   // Extra room 'both' needs when coming back from 'shared', so a header at
   // the boundary does not flap while the window is resized.
   const HYSTERESIS_PX = 8;
+  // offsetWidth and clientWidth are integer-rounded, so a sum of them can be
+  // off by a pixel or two; 'both' keeps this much spare so the name never
+  // ends up truncated by rounding.
+  const ROUNDING_SLACK_PX = 2;
   // Space before each cluster item: the cluster's padding-left, then its gap.
   const GAP_PX = 6;
 
@@ -38,8 +42,9 @@ ${HEADER} > a.table-deck-row-link {
 ${HEADER} > a.table-deck-row-link > span[title] {
   min-width: 0;
 }
-${HEADER} > span.text-nowrap.fw-normal {
+${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
   flex: none;
+  white-space: nowrap;
 }
 .mox-cluster {
   margin-left: auto;
@@ -70,7 +75,67 @@ ${HEADER} > span.text-nowrap.fw-normal {
 `;
 
   /**
-   * Read a header's geometry from the live layout.
+   * Whether an element takes part in layout. A display: none sibling has no
+   * width and no client rects; its margins must not count.
+   * @param {HTMLElement} el
+   * @returns {boolean}
+   */
+  function isRendered(el) {
+    return el.offsetWidth > 0 || el.getClientRects().length > 0;
+  }
+
+  /**
+   * An element's horizontal margins.
+   * @param {CSSStyleDeclaration} style
+   * @returns {number}
+   */
+  function marginsOf(style) {
+    return px(style.marginLeft) + px(style.marginRight);
+  }
+
+  /**
+   * A computed length in px; 0 when empty or not a number.
+   * @param {string} value
+   * @returns {number}
+   */
+  function px(value) {
+    return parseFloat(value) || 0;
+  }
+
+  /**
+   * Width of the header anchor without its name, independent of layout.
+   *
+   * Summed from the anchor's own padding and border plus each rendered
+   * child other than the name (type icon, "(n)", caret) with its margins,
+   * plus the name's margins. Not taken from the anchor's own width: with
+   * min-width: 0 and overflow hidden it can be squeezed below its children,
+   * and its scrollWidth reflects the name's truncated, not full, width, so
+   * neither tells how much room the non-name parts really need. The
+   * non-name children are inline-blocks that never shrink below their
+   * content, so their widths are stable across layouts.
+   * @param {HTMLElement} link - a.table-deck-row-link
+   * @param {HTMLElement|null} name - Its span[title]
+   * @returns {number}
+   */
+  function anchorFixedWidth(link, name) {
+    const style = getComputedStyle(link);
+    let width =
+      px(style.paddingLeft) +
+      px(style.paddingRight) +
+      px(style.borderLeftWidth) +
+      px(style.borderRightWidth);
+    for (const child of link.children) {
+      if (!isRendered(child) && child !== name) continue;
+      const margins = marginsOf(getComputedStyle(child));
+      width += child === name ? margins : child.offsetWidth + margins;
+    }
+    return width;
+  }
+
+  /**
+   * Read a header's geometry from the live layout. Moxfield's siblings of
+   * the anchor are pinned (flex: none, nowrap) by our CSS, so their widths
+   * do not depend on the current layout either.
    * @param {HTMLElement} li - The header li
    * @param {HTMLElement} cluster - Our cluster inside it
    * @returns {{available: number, fixed: number, nameFull: number}|null}
@@ -78,7 +143,6 @@ ${HEADER} > span.text-nowrap.fw-normal {
    */
   function readHeader(li, cluster) {
     if (li.clientWidth === 0) return null;
-    const px = (value) => parseFloat(value) || 0;
     const style = getComputedStyle(li);
     const available =
       li.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
@@ -86,15 +150,12 @@ ${HEADER} > span.text-nowrap.fw-normal {
     let fixed = 0;
     let nameFull = 0;
     for (const child of li.children) {
-      if (child === cluster) continue;
-      const childStyle = getComputedStyle(child);
-      const margins = px(childStyle.marginLeft) + px(childStyle.marginRight);
-      const name = child.matches('a.table-deck-row-link')
-        ? child.querySelector(':scope > span[title]')
-        : null;
-      if (name) {
-        nameFull = name.scrollWidth;
-        fixed += child.offsetWidth - name.offsetWidth + margins;
+      if (child === cluster || !isRendered(child)) continue;
+      const margins = marginsOf(getComputedStyle(child));
+      if (child.matches('a.table-deck-row-link')) {
+        const name = child.querySelector(':scope > span[title]');
+        if (name) nameFull = name.scrollWidth;
+        fixed += anchorFixedWidth(child, name) + margins;
       } else {
         fixed += child.offsetWidth + margins;
       }
@@ -163,7 +224,8 @@ ${HEADER} > span.text-nowrap.fw-normal {
     const squeezed = fixed + nameMin + widest + gap;
     if (items.length === 1) return squeezed <= available ? 'single' : 'hidden';
 
-    const margin = previous === 'shared' ? HYSTERESIS_PX : 0;
+    const margin =
+      ROUNDING_SLACK_PX + (previous === 'shared' ? HYSTERESIS_PX : 0);
     if (fixed + nameFull + curve + chip + 2 * gap + margin <= available) {
       return 'both';
     }
@@ -432,15 +494,17 @@ ${HEADER} > span.text-nowrap.fw-normal {
     if (domHelpers.isGoldfishMode() || (!odds && !curveOn)) {
       removeClusters();
       sectionOdds.cleanup();
+      sectionCurve.cleanup();
       return;
     }
 
-    const deckId = domHelpers.getDeckId();
+    await deckSettings.ensureLoaded(domHelpers.getDeckId());
+    if (start !== epoch) return; // cleaned up while loading
+
+    // Read the page once, after the await, so nothing below can go stale.
     const groupBy = domHelpers.getGroupBy();
     const library = domHelpers.readLibrary();
     const sections = domHelpers.getMainboardSections();
-    await deckSettings.ensureLoaded(deckId);
-    if (start !== epoch) return; // cleaned up while loading
 
     init();
     if (odds) sectionOdds.init();
@@ -459,8 +523,6 @@ ${HEADER} > span.text-nowrap.fw-normal {
 
     sections.forEach((section) => {
       const { headerLi } = section;
-      // Cheap guard: React may have replaced the header during the await.
-      if (!headerLi.isConnected) return;
       const existing = clusterOf(headerLi);
       if (existing) keep.add(existing);
       try {
@@ -562,8 +624,8 @@ ${HEADER} > span.text-nowrap.fw-normal {
   }
 
   /**
-   * Add the stylesheet, the click and deck-settings listeners and the resize
-   * observer. Does not render; call refresh(). Idempotent.
+   * Add the stylesheet, the click, deck-settings and font listeners and the
+   * resize observer. Does not render; call refresh(). Idempotent.
    */
   function init() {
     if (initialized) return;
@@ -574,6 +636,24 @@ ${HEADER} > span.text-nowrap.fw-normal {
     resizeObserver = new ResizeObserver(onResize);
     observed = [];
     observeArticles();
+
+    // A web font arriving late changes text widths without any DOM mutation
+    // or resize. document.fonts may be missing (jsdom).
+    const fonts = document.fonts;
+    if (fonts) {
+      const token = epoch;
+      fonts.ready?.then(() => {
+        if (token === epoch) scheduleLayout();
+      });
+      fonts.addEventListener?.('loadingdone', onFontsLoaded);
+    }
+  }
+
+  /**
+   * More fonts finished loading: widths may have changed.
+   */
+  function onFontsLoaded() {
+    scheduleLayout();
   }
 
   /**
@@ -590,6 +670,7 @@ ${HEADER} > span.text-nowrap.fw-normal {
     const { deckSettings, sectionOdds, sectionCurve } = ns();
     deckSettings?.events.removeEventListener('change', onSettingsChange);
     document.removeEventListener('click', onClick, true);
+    document.fonts?.removeEventListener?.('loadingdone', onFontsLoaded);
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = null;
     observed = [];
@@ -635,5 +716,6 @@ ${HEADER} > span.text-nowrap.fw-normal {
     setMetricsForTests,
     MIN_NAME_PX,
     HYSTERESIS_PX,
+    ROUNDING_SLACK_PX,
   };
 })();

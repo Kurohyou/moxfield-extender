@@ -127,6 +127,51 @@ function click(target) {
   return event;
 }
 
+const HEADER_LI = 'section.deckview article > ul > li:first-child';
+
+/**
+ * Widths of a header anchor and its children, and of our parts: link 120,
+ * icon 20, name 60 (80 untruncated), count 30, caret 10, chip 24, curve 30.
+ * @param {Element} el
+ * @returns {{offset?: number, scroll?: number}}
+ */
+function anchorWidths(el) {
+  if (el.matches('.mox-odds')) return { offset: 24 };
+  if (el.matches('.mox-curve')) return { offset: 30 };
+  if (el.matches('a.table-deck-row-link')) return { offset: 120 };
+  if (!el.parentElement?.matches('a.table-deck-row-link')) return {};
+  if (el.matches('[title]')) return { offset: 60, scroll: 80 };
+  if (el.matches('.text-end')) return { offset: 20 };
+  if (el.matches('.fas')) return { offset: 10 };
+  return { offset: 30 };
+}
+
+/**
+ * Stub jsdom's layout getters from a width table. An element with an offset
+ * width has one client rect; others have none (not rendered).
+ * @param {function(Element): {client?: number, offset?: number, scroll?: number}} widths
+ */
+function stubLayout(widths) {
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(
+    function () {
+      return widths(this).offset ?? 0;
+    }
+  );
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(
+    function () {
+      return widths(this).client ?? 0;
+    }
+  );
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(
+    function () {
+      return widths(this).scroll ?? 0;
+    }
+  );
+  vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function () {
+    return widths(this).offset ? [{}] : [];
+  });
+}
+
 /**
  * Let a deckSettings 'change' refresh run to completion.
  */
@@ -252,6 +297,31 @@ describe('refresh', () => {
     expect(document.querySelectorAll('.mox-cluster')).toHaveLength(0);
   });
 
+  it('reads the deck after deck settings load', async () => {
+    const { oddsMath } = window.MoxfieldExtended;
+    const pending = headerCluster.refresh();
+    const footer = [...document.querySelectorAll('div')].find(
+      (el) => el.children.length === 0 && /main deck/.test(el.textContent)
+    );
+    footer.textContent = '90 main deck';
+    await pending;
+    const expected = oddsMath.evaluate({ N: 89, K: 30, turns: 3, k: 1 });
+    expect(cluster('Creatures').querySelector('.mox-odds').title).toBe(
+      expected.tooltip
+    );
+  });
+
+  it('removes the curve stylesheet when both are off', async () => {
+    await headerCluster.refresh();
+    expect(document.getElementById('mox-curve-styles')).not.toBeNull();
+    Object.assign(window.MoxfieldExtended.state.settings, {
+      sectionOddsEnabled: false,
+      sectionCurveEnabled: false,
+    });
+    await headerCluster.refresh();
+    expect(document.getElementById('mox-curve-styles')).toBeNull();
+  });
+
   it('shows ? on every chip when the footer is missing', async () => {
     build({ footerCount: null });
     await headerCluster.refresh();
@@ -308,40 +378,58 @@ describe('refresh', () => {
 
   it('measures headers from live layout by default', async () => {
     headerCluster.setMetricsForTests(null);
-    // Header 200 wide; link 120 with a 60 px (80 px untruncated) name, so
-    // fixed 60. Both need 60 + 80 + 30 + 24 + 12 = 206: too wide, so shared.
-    const widths = (el) => {
-      if (el.matches('section.deckview article > ul > li:first-child')) {
-        return { client: 200 };
-      }
-      if (el.matches('.mox-odds')) return { offset: 24 };
-      if (el.matches('.mox-curve')) return { offset: 30 };
-      if (el.matches('a.table-deck-row-link')) return { offset: 120 };
-      if (el.matches('a.table-deck-row-link > span[title]')) {
-        return { offset: 60, scroll: 80 };
-      }
-      return {};
-    };
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(
-      function () {
-        return widths(this).offset ?? 0;
-      }
-    );
-    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(
-      function () {
-        return widths(this).client ?? 0;
-      }
-    );
-    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(
-      function () {
-        return widths(this).scroll ?? 0;
-      }
-    );
+    // Header 200 wide. The anchor's non-name children (icon 20, count 30,
+    // caret 10) make fixed 60; the name is 80 untruncated. Both need
+    // 60 + 80 + 30 + 24 + 12 + 2 = 208: too wide, so shared.
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: 200 };
+      return anchorWidths(el);
+    });
     await headerCluster.refresh();
     expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
     expect(cluster('Lands').getAttribute('data-layout')).toBe('single');
     const records = await recordMutations(() => headerCluster.refresh());
     expect(records).toEqual([]);
+  });
+
+  it('measures fixed from the anchor’s children when the anchor is clipped', async () => {
+    headerCluster.setMetricsForTests(null);
+    // Header 207 wide: one short of both with fixed 60. The anchor reports
+    // 50, clipped below its children (60 + a 60 px name); a fixed taken from
+    // its own width would come out as -10 and wrongly fit both.
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: 207 };
+      if (el.matches('a.table-deck-row-link')) return { offset: 50 };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
+  });
+
+  it('counts shown header siblings and their margins, skipping hidden ones', async () => {
+    headerCluster.setMetricsForTests(null);
+    // Creatures gets a 40 px "+ 1 other" with a 4 px margin, so fixed is
+    // 60 + 44 = 104 and the shared slot needs 104 + 28 + 30 + 6 = 168.
+    // A hidden sibling with a 100 px margin must not count.
+    const other = document.createElement('span');
+    other.className = 'ms-1 fw-normal text-muted';
+    other.style.marginLeft = '4px';
+    other.textContent = '+ 1 other';
+    const hidden = document.createElement('span');
+    hidden.style.display = 'none';
+    hidden.style.marginLeft = '100px';
+    header('Creatures').append(other, hidden);
+    let liWidth = 168;
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: liWidth };
+      if (el === other) return { offset: 40 };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
+    liWidth = 167;
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('hidden');
   });
 
   it('skips layout for a header with no box', async () => {
@@ -491,6 +579,71 @@ describe('shared-slot click', () => {
     });
     cluster('Creatures').dispatchEvent(event);
     expect(deckSettings.get().sharedSlot).toBe('odds');
+  });
+});
+
+describe('web fonts', () => {
+  let fonts;
+  let ready;
+
+  beforeEach(() => {
+    headerCluster.cleanup();
+    fonts = new EventTarget();
+    fonts.ready = new Promise((resolve) => {
+      ready = resolve;
+    });
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: fonts,
+    });
+  });
+
+  afterEach(() => {
+    delete document.fonts;
+  });
+
+  /**
+   * Refresh with layout skipped, then let layout measure again.
+   */
+  async function refreshWithoutLayout() {
+    headerCluster.setMetricsForTests({ ...metrics, header: () => null });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').hasAttribute('data-layout')).toBe(false);
+    headerCluster.setMetricsForTests(metrics);
+  }
+
+  it('re-runs layout once fonts are ready', async () => {
+    headerCluster.init();
+    await refreshWithoutLayout();
+    ready();
+    await settle();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
+  });
+
+  it('re-runs layout when more fonts finish loading', async () => {
+    headerCluster.init();
+    await refreshWithoutLayout();
+    fonts.dispatchEvent(new Event('loadingdone'));
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
+  });
+
+  it('stops listening to fonts after cleanup', async () => {
+    headerCluster.init();
+    await refreshWithoutLayout();
+    const kept = cluster('Creatures');
+    headerCluster.cleanup();
+    header('Creatures').appendChild(kept);
+    fonts.dispatchEvent(new Event('loadingdone'));
+    ready();
+    await settle();
+    expect(kept.hasAttribute('data-layout')).toBe(false);
+  });
+
+  it('works without document.fonts', async () => {
+    delete document.fonts;
+    headerCluster.init();
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
   });
 });
 

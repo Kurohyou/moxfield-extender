@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 let chooseHeaderLayout;
 let HYSTERESIS_PX;
 let MIN_NAME_PX;
+let ROUNDING_SLACK_PX;
 
-// fixed 60 + name 80 + curve 30 + chip 24 + 2 gaps of 6 = 206 for 'both'.
+// fixed 60 + name 80 + curve 30 + chip 24 + 2 gaps of 6 + 2 px rounding
+// slack = 208 for 'both'.
 // fixed 60 + nameMin 28 + max(30, 24) + gap 6 = 124 for 'shared'.
-const BOTH_NEED = 206;
+const BOTH_NEED = 208;
 const SHARED_NEED = 124;
 
 /**
@@ -31,13 +33,14 @@ function input(overrides = {}) {
 beforeEach(async () => {
   vi.resetModules();
   await import('../src/content/headerCluster.js');
-  ({ chooseHeaderLayout, HYSTERESIS_PX, MIN_NAME_PX } =
+  ({ chooseHeaderLayout, HYSTERESIS_PX, MIN_NAME_PX, ROUNDING_SLACK_PX } =
     window.MoxfieldExtended.headerCluster);
 });
 
 describe('constants', () => {
   it('exports the hysteresis and minimum name widths', () => {
     expect(HYSTERESIS_PX).toBe(8);
+    expect(ROUNDING_SLACK_PX).toBe(2);
     expect(MIN_NAME_PX).toBeGreaterThanOrEqual(20);
     expect(MIN_NAME_PX).toBeLessThanOrEqual(40);
   });
