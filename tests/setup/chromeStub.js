@@ -33,16 +33,43 @@
  * - A write whose new value deep-equals the old one produces no change entry
  *   (Chromium's value store only records differing values), and onChanged does
  *   not fire when no entry remains.
+ * - Failure: `chrome.storage.<area>.__failNextWrite(message)` makes the next
+ *   set() on that area fail like a quota error: nothing is stored, onChanged
+ *   does not fire, the callback runs with chrome.runtime.lastError set (and
+ *   cleared after it), and the promise form rejects.
  */
 import { isDeepStrictEqual } from 'node:util';
 import { beforeEach } from 'vitest';
 
 const stores = { sync: {}, local: {} };
+const pendingFailures = { sync: null, local: null };
 let changeListeners = [];
 let messageListeners = [];
 
 const has = (data, key) => Object.hasOwn(data, key);
 const clone = (value) => (value === undefined ? undefined : structuredClone(value));
+
+/**
+ * Fail a write the way chrome does: lastError set only while the callback
+ * runs, or a rejected promise when no callback is given.
+ * @param {Function|undefined} callback
+ * @param {string} message
+ * @returns {Promise<never>|undefined}
+ */
+function fail(callback, message) {
+  if (typeof callback === 'function') {
+    queueMicrotask(() => {
+      globalThis.chrome.runtime.lastError = { message };
+      try {
+        callback();
+      } finally {
+        globalThis.chrome.runtime.lastError = undefined;
+      }
+    });
+    return undefined;
+  }
+  return Promise.reject(new Error(message));
+}
 
 /**
  * Support both the callback and the promise form of a chrome API.
@@ -97,6 +124,11 @@ function createArea(areaName) {
     },
 
     set(items, callback) {
+      const failure = pendingFailures[areaName];
+      if (failure !== null) {
+        pendingFailures[areaName] = null;
+        return fail(callback, failure);
+      }
       const data = area();
       const changes = {};
       Object.keys(items).forEach((key) => {
@@ -122,6 +154,14 @@ function createArea(areaName) {
       });
       fireChanged(changes, areaName);
       return respond(callback, undefined);
+    },
+
+    /**
+     * Test hook: make the next set() on this area fail.
+     * @param {string} [message]
+     */
+    __failNextWrite(message = 'QUOTA_BYTES_PER_ITEM quota exceeded') {
+      pendingFailures[areaName] = message;
     },
   };
 }
@@ -155,6 +195,9 @@ globalThis.chrome = {
   __reset() {
     stores.sync = {};
     stores.local = {};
+    pendingFailures.sync = null;
+    pendingFailures.local = null;
+    globalThis.chrome.runtime.lastError = undefined;
     changeListeners = [];
     messageListeners = [];
   },

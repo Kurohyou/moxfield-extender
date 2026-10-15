@@ -513,6 +513,21 @@ describe('refresh', () => {
     expect(reads).toHaveBeenCalledTimes(2);
   });
 
+  it('does not refresh headers for a price-bar change on the shared bus', async () => {
+    await headerCluster.refresh();
+    const reads = vi.spyOn(domHelpers, 'getMainboardSections');
+    const fire = (source) =>
+      deckSettings.events.dispatchEvent(
+        new CustomEvent('change', { detail: { source } })
+      );
+    fire('price');
+    await settle();
+    expect(reads).not.toHaveBeenCalled();
+    fire('external'); // control: any other source refreshes
+    await settle();
+    expect(reads).toHaveBeenCalled();
+  });
+
   it('refreshes an open stepper on a DOM refresh', async () => {
     const spy = vi.spyOn(sectionOdds, 'refreshStepper');
     await headerCluster.refresh();

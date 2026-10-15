@@ -89,11 +89,30 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
   /**
    * After a state change: update the bars, persist, and notify listeners.
+   * Supersedes a pending init restore, so the user's action wins.
    */
   function commit() {
+    initEpoch += 1;
     syncBars();
     saveActiveState(isActive, isDeckWideMode);
     notifyChange();
+  }
+
+  /**
+   * Set on/off and mode together, committing once (one sync write) when
+   * either changed. Callers apply their own guards.
+   * @param {boolean} active
+   * @param {boolean} deckWide
+   */
+  function update(active, deckWide) {
+    if (active === isActive && deckWide === isDeckWideMode) return;
+    isActive = active;
+    isDeckWideMode = deckWide;
+    console.log(LOG_PREFIX, `Price visualization: ${isActive ? (isDeckWideMode ? 'deck-wide' : 'per-section') : 'OFF'}`);
+    if (isActive && window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
+      console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
+    }
+    commit();
   }
 
   /**
@@ -112,10 +131,8 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   function setActive(on) {
     if (!isInitialized) return;
     const next = Boolean(on);
-    if (next === isActive) return;
-    if (next && !isPriceAvailable()) return;
-    isActive = next;
-    commit();
+    if (next && !isActive && !isPriceAvailable()) return;
+    update(next, isDeckWideMode);
   }
 
   /**
@@ -125,10 +142,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
    */
   function setDeckWide(deckWide) {
     if (!isInitialized) return;
-    const next = Boolean(deckWide);
-    if (next === isDeckWideMode) return;
-    isDeckWideMode = next;
-    commit();
+    update(isActive, Boolean(deckWide));
   }
 
   /**
@@ -139,15 +153,12 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     if (!isInitialized || !isPriceAvailable()) return;
 
     if (!isActive) {
-      isActive = true;
-      isDeckWideMode = false;
+      update(true, false);
     } else if (!isDeckWideMode) {
-      isDeckWideMode = true;
+      update(true, true);
     } else {
-      isActive = false;
+      update(false, true);
     }
-    console.log(LOG_PREFIX, `Price visualization: ${isActive ? (isDeckWideMode ? 'deck-wide' : 'per-section') : 'OFF'}`);
-    commit();
   }
 
   /**
@@ -188,7 +199,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     }
 
     // Attach keyboard listener for toggle
-    keydownHandler = handleKeyDown.bind(this);
+    keydownHandler = handleKeyDown;
     document.addEventListener('keydown', keydownHandler);
 
     isInitialized = true;
@@ -243,58 +254,40 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   }
 
   /**
-   * Toggle the visualization on/off
+   * Toggle the visualization on/off (Alt+P). Needs the viewer's Moxfield
+   * Price option either way, as before.
    */
   function toggle() {
     if (!isInitialized) return;
 
     // Check if price data is available
-    const priceEnabled = window.MoxfieldExtended?.domHelpers?.isPriceEnabled();
-    if (!priceEnabled) {
+    if (!isPriceAvailable()) {
       console.log(LOG_PREFIX, 'Price visualization requires price data to be enabled in Moxfield view options');
       return;
     }
 
-    isActive = !isActive;
-    console.log(LOG_PREFIX, `Price visualization: ${isActive ? 'ON' : 'OFF'} (${isDeckWideMode ? 'deck-wide' : 'per-section'})`);
-
-    if (isActive && window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
-      console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
-    }
-
-    // Apply or remove, persist state, notify the badge
-    commit();
+    setActive(!isActive);
   }
 
   /**
-   * Switch between section mode and deck-wide mode
-   * If not active, starts the visualization in deck-wide mode
+   * Switch between section mode and deck-wide mode (Alt+Shift+P).
+   * If not active, starts the visualization in deck-wide mode.
    */
   function switchMode() {
     if (!isInitialized) return;
 
-    // If not active, start in deck-wide mode
-    if (!isActive) {
-      // Check if price data is available
-      const priceEnabled = window.MoxfieldExtended?.domHelpers?.isPriceEnabled();
-      if (!priceEnabled) {
-        console.log(LOG_PREFIX, 'Price visualization requires price data to be enabled in Moxfield view options');
-        return;
-      }
-
-      isDeckWideMode = true;
-      isActive = true;
-      commit();
-      console.log(LOG_PREFIX, 'Price visualization: ON (deck-wide)');
+    // Already active, just switch modes
+    if (isActive) {
+      setDeckWide(!isDeckWideMode);
       return;
     }
 
-    // Already active, just switch modes
-    isDeckWideMode = !isDeckWideMode;
-    console.log(LOG_PREFIX, `Price visualization mode: ${isDeckWideMode ? 'deck-wide' : 'per-section'}`);
-
-    // Re-apply with new mode, persist state, notify the badge
-    commit();
+    // If not active, start in deck-wide mode (one commit, one sync write)
+    if (!isPriceAvailable()) {
+      console.log(LOG_PREFIX, 'Price visualization requires price data to be enabled in Moxfield view options');
+      return;
+    }
+    update(true, true);
   }
 
   /**
@@ -385,21 +378,24 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   }
 
   /**
-   * Handle keydown events for toggle shortcut
+   * Handle keydown events for toggle shortcut: Alt+P toggles on/off,
+   * Alt+Shift+P switches between section/deck-wide mode. Matched on
+   * event.key, as before. Skipped in editable fields; a held key's
+   * autorepeats are swallowed without acting, so they cost no sync writes.
+   * @param {KeyboardEvent} event
    */
   function handleKeyDown(event) {
-    // Alt+P to toggle on/off
-    if (event.altKey && !event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === TOGGLE_KEY) {
-      event.preventDefault();
-      event.stopPropagation();
-      toggle();
-    }
+    if (!event.altKey || event.ctrlKey || event.key.toLowerCase() !== TOGGLE_KEY) return;
+    if (window.MoxfieldExtended.domHelpers?.isEditableTarget(event.target)) return;
 
-    // Alt+Shift+P to switch between section/deck-wide mode
-    if (event.altKey && event.shiftKey && !event.ctrlKey && event.key.toLowerCase() === TOGGLE_KEY) {
-      event.preventDefault();
-      event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+
+    if (event.shiftKey) {
       switchMode();
+    } else {
+      toggle();
     }
   }
 

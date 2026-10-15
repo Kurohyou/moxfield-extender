@@ -21,8 +21,6 @@
   const SECTION_LIST = 'section.deckview article > ul';
   const HEADER_TITLE =
     ':scope > li:first-child > a.table-deck-row-link > span[title]';
-  const EDITABLE =
-    'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
   // Alt+<code> → step. Matched on code, not key: macOS Option rewrites key.
   const STEPS = new Map([
@@ -340,7 +338,11 @@
 
     ensureStyles();
     let handle = null;
-    const onChange = () => handle && handle.update();
+    // Price-bar changes share the bus but don't affect the stepper.
+    const onChange = (event) => {
+      if (event?.detail?.source === 'price') return;
+      if (handle) handle.update();
+    };
     handle = popover.open(
       anchorEl,
       (container, self) => renderStepper(container, self, sectionName),
@@ -413,25 +415,19 @@
   }
 
   /**
-   * Whether a key event target accepts typing.
-   * @param {EventTarget} target
-   * @returns {boolean}
-   */
-  function isEditable(target) {
-    if (!target || !target.closest) return false;
-    return (
-      Boolean(target.closest(EDITABLE)) || target.isContentEditable === true
-    );
-  }
-
-  /**
    * Alt+= / Alt+− raise or lower the hovered Section's desired override.
    * @param {KeyboardEvent} event
    */
   function onKeydown(event) {
     if (!event.altKey || event.ctrlKey || event.metaKey) return;
     const delta = STEPS.get(event.code);
-    if (!delta || isEditable(event.target) || hoveredName === null) return;
+    if (
+      !delta ||
+      ns().domHelpers.isEditableTarget(event.target) ||
+      hoveredName === null
+    ) {
+      return;
+    }
     const { state, domHelpers, deckSettings } = ns();
     if (!state?.settings?.sectionOddsEnabled) return;
 

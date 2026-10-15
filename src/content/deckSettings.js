@@ -128,7 +128,8 @@
 
   /**
    * Notify views that settings changed.
-   * @param {string} source - 'turns' | 'desired' | 'sharedSlot' | 'override' | 'load' | 'external'
+   * @param {string} source - 'turns' | 'desired' | 'sharedSlot' | 'override' | 'load' | 'external'.
+   *   priceVisualization also dispatches 'price' on this bus for its own changes.
    */
   function notify(source) {
     snapshot = null;

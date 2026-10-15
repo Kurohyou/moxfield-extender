@@ -263,6 +263,21 @@
     return changed.length > 0 && changed.every((node) => isOwnNode(node, target));
   }
 
+  // Targets where a keystroke is text input, so shortcuts stay out of the way.
+  const EDITABLE =
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+
+  /**
+   * Whether keys typed at this target are text input: a form field, or
+   * inside contenteditable. Shortcut handlers skip such targets.
+   * @param {EventTarget|null} target - Usually a KeyboardEvent's target
+   * @returns {boolean}
+   */
+  function isEditableTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return target.isContentEditable === true || Boolean(target.closest(EDITABLE));
+  }
+
   /**
    * Check if price data is currently enabled/visible
    * @returns {boolean}
@@ -335,6 +350,7 @@
       readLibrary,
       getGroupBy,
       isOwnMutation,
+      isEditableTarget,
       isPriceEnabled,
       extractPrice,
       extractQuantity,

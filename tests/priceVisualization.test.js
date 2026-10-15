@@ -145,6 +145,43 @@ describe('getState', () => {
   });
 });
 
+describe('init restore', () => {
+  it('lets a user action before the restore resolves win', async () => {
+    await chrome.storage.sync.set({
+      priceVisualizationActive: true,
+      priceVisualizationDeckWide: true,
+    });
+    price.init();
+    price.cycle(); // restore still pending: off → Section
+    await settle();
+    expect(price.getState()).toMatchObject({ active: true, deckWide: false });
+    const stored = await chrome.storage.sync.get([
+      'priceVisualizationActive',
+      'priceVisualizationDeckWide',
+    ]);
+    expect(stored).toEqual({
+      priceVisualizationActive: true,
+      priceVisualizationDeckWide: false,
+    });
+    expect(barred().some((el) => el.classList.contains('mox-deck-wide'))).toBe(
+      false
+    );
+  });
+
+  it('drops the restore when cleaned up before it resolves', async () => {
+    await chrome.storage.sync.set({ priceVisualizationActive: true });
+    const seen = vi.fn();
+    deckSettings.events.addEventListener('change', seen);
+    price.init();
+    price.cleanup();
+    await settle();
+    deckSettings.events.removeEventListener('change', seen);
+    expect(price.getState().active).toBe(false);
+    expect(barred()).toHaveLength(0);
+    expect(seen).not.toHaveBeenCalled();
+  });
+});
+
 describe('cycle', () => {
   it('goes Section → Deck → Off → Section and persists each step', async () => {
     await start();
@@ -314,12 +351,16 @@ describe('no native dialogs', () => {
 });
 
 describe('refresh', () => {
-  it('causes no childList mutations outside [data-mox] when active', async () => {
+  it('causes no childList or attribute mutations outside [data-mox] when active', async () => {
     await start({ priceVisualizationActive: true });
     price.refresh();
     const records = [];
     const observer = new MutationObserver((batch) => records.push(...batch));
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      attributes: true,
+      subtree: true,
+    });
     price.refresh();
     price.refresh();
     await Promise.resolve();
@@ -350,6 +391,46 @@ describe('Alt+P', () => {
     expect(price.getState().active).toBe(true);
     key({ altKey: true, key: 'p', code: 'KeyP' });
     expect(price.getState().active).toBe(false);
+  });
+
+  it('swallows autorepeats without toggling', async () => {
+    await start();
+    key({ altKey: true, key: 'p', code: 'KeyP' });
+    const repeat = key({ altKey: true, key: 'p', code: 'KeyP', repeat: true });
+    expect(repeat.defaultPrevented).toBe(true);
+    expect(price.getState().active).toBe(true);
+    const shifted = key({
+      altKey: true,
+      shiftKey: true,
+      key: 'P',
+      code: 'KeyP',
+      repeat: true,
+    });
+    expect(shifted.defaultPrevented).toBe(true);
+    expect(price.getState().deckWide).toBe(false);
+  });
+
+  it('is ignored in editable fields', async () => {
+    await start();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      altKey: true,
+      key: 'p',
+      code: 'KeyP',
+    });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(price.getState().active).toBe(false);
+  });
+
+  it('writes sync storage once when Alt+Shift+P turns it on', async () => {
+    await start();
+    const writes = vi.spyOn(chrome.storage.sync, 'set');
+    key({ altKey: true, shiftKey: true, key: 'P', code: 'KeyP' });
+    expect(writes).toHaveBeenCalledTimes(1);
   });
 
   it('Alt+Shift+P starts in Deck mode, then switches mode', async () => {

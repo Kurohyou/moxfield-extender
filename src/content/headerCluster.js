@@ -598,8 +598,11 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
 
   /**
    * Deck settings changed: re-render. The stepper redraws itself then.
+   * Price-bar changes share the event bus but don't affect headers.
+   * @param {CustomEvent} event
    */
-  function onSettingsChange() {
+  function onSettingsChange(event) {
+    if (event?.detail?.source === 'price') return;
     request(false);
   }
 

@@ -42,3 +42,19 @@ describe('DEFAULT_SETTINGS', () => {
     });
   });
 });
+
+describe('saveSettings', () => {
+  it('resolves and stores on success', async () => {
+    await expect(storage.setSetting('sectionOddsEnabled', false)).resolves.toBeUndefined();
+    expect((await chrome.storage.sync.get('sectionOddsEnabled')).sectionOddsEnabled).toBe(false);
+  });
+
+  it('rejects with chrome.runtime.lastError when the write fails', async () => {
+    chrome.storage.sync.__failNextWrite('MAX_WRITE_OPERATIONS_PER_MINUTE quota exceeded');
+    await expect(storage.setSetting('sectionOddsEnabled', false)).rejects.toThrow(
+      /MAX_WRITE_OPERATIONS_PER_MINUTE/
+    );
+    expect(await chrome.storage.sync.get('sectionOddsEnabled')).toEqual({});
+    expect(chrome.runtime.lastError).toBeUndefined();
+  });
+});

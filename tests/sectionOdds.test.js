@@ -599,6 +599,19 @@ describe('stepper', () => {
     expect(stepper().textContent).toContain(expected.tooltip);
   });
 
+  it('ignores price-bar changes on the shared bus', () => {
+    openCreatures();
+    const reads = vi.spyOn(domHelpers, 'getMainboardSections');
+    const fire = (source) =>
+      deckSettings.events.dispatchEvent(
+        new CustomEvent('change', { detail: { source } })
+      );
+    fire('price');
+    expect(reads).not.toHaveBeenCalled();
+    fire('external'); // control: any other source redraws
+    expect(reads).toHaveBeenCalled();
+  });
+
   it('unsubscribes from deck settings once closed', () => {
     openCreatures();
     const root = stepper();
