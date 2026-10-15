@@ -64,7 +64,6 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.mox-stepper__row button:disabled,
 .mox-stepper__row button[aria-disabled='true'] {
   opacity: 0.4;
   cursor: default;
@@ -279,10 +278,14 @@
     );
 
     /**
-     * Step the Section's desired count, read fresh at click time.
+     * Step the Section's desired count, read fresh at click time. A button
+     * at its limit is aria-disabled rather than disabled, so it keeps focus;
+     * its clicks are ignored here.
+     * @param {HTMLButtonElement} button
      * @param {number} delta
      */
-    function step(delta) {
+    function step(button, delta) {
+      if (button.getAttribute('aria-disabled') === 'true') return;
       if (!pageDeckLoaded()) return;
       const { domHelpers, deckSettings } = ns();
       const groupBy = domHelpers.getGroupBy();
@@ -291,9 +294,8 @@
     }
 
     /**
-     * Step the Section's By turn, read fresh at click time. A button at its
-     * limit is aria-disabled rather than disabled, so it keeps focus; its
-     * clicks are ignored here.
+     * Step the Section's By turn, read fresh at click time. Clicks on a
+     * button at its limit are ignored, as in step().
      * @param {HTMLButtonElement} button
      * @param {number} delta
      */
@@ -308,10 +310,10 @@
 
     root
       .querySelector('.mox-stepper__dec')
-      .addEventListener('click', () => step(-1));
+      .addEventListener('click', (event) => step(event.currentTarget, -1));
     root
       .querySelector('.mox-stepper__inc')
-      .addEventListener('click', () => step(1));
+      .addEventListener('click', (event) => step(event.currentTarget, 1));
     root
       .querySelector('.mox-stepper__turns-dec')
       .addEventListener('click', (event) => stepTurns(event.currentTarget, -1));
@@ -381,8 +383,7 @@
     );
     setText(root.querySelector('.mox-stepper__value'), String(desired));
 
-    const dec = root.querySelector('.mox-stepper__dec');
-    if (dec.disabled !== desired <= 1) dec.disabled = desired <= 1;
+    setInert(root.querySelector('.mox-stepper__dec'), desired <= 1);
 
     setText(
       root.querySelector('.mox-stepper__turns-value'),

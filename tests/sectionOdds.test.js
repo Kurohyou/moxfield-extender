@@ -583,18 +583,29 @@ describe('stepper', () => {
     expect(stepper().textContent).toContain(domHelpers.readLibrary().reason);
   });
 
-  it('+ and − set the override; − is disabled at 1', () => {
+  it('+ and − set the override; − is inert at 1 but keeps focus', () => {
+    const inert = (button) => button.getAttribute('aria-disabled') === 'true';
     openCreatures();
-    expect(dec().disabled).toBe(true);
+    expect(inert(dec())).toBe(true);
+    expect(dec().disabled).toBe(false);
 
     inc().click();
     expect(deckSettings.desiredFor('type', 'Creatures')).toBe(2);
     expect(value()).toBe('2');
-    expect(dec().disabled).toBe(false);
+    expect(inert(dec())).toBe(false);
 
     dec().click();
     expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
-    expect(dec().disabled).toBe(true);
+    expect(inert(dec())).toBe(true);
+    expect(dec().disabled).toBe(false);
+  });
+
+  it('ignores a click on − at 1', () => {
+    openCreatures();
+    const set = vi.spyOn(deckSettings, 'setOverride');
+    dec().click();
+    expect(set).not.toHaveBeenCalled();
+    expect(deckSettings.desiredFor('type', 'Creatures')).toBe(1);
   });
 
   it('has no upper bound', () => {
