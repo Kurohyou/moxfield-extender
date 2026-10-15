@@ -585,6 +585,9 @@ ${HEADER} > span.text-nowrap.fw-normal {
   function cleanup() {
     epoch += 1;
     initialized = false;
+    // Drop a rerun queued before now, or it would render and re-init.
+    rerun = false;
+    rerunStepper = false;
     const { deckSettings, sectionOdds, sectionCurve } = ns();
     deckSettings?.events.removeEventListener('change', onSettingsChange);
     document.removeEventListener('click', onClick, true);

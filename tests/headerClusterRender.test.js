@@ -530,6 +530,16 @@ describe('init and cleanup', () => {
     expect(document.querySelectorAll('.mox-cluster[data-mox]')).toHaveLength(0);
   });
 
+  it('stays cleaned up when a rerun was queued before cleanup', async () => {
+    const pending = headerCluster.refresh();
+    deckSettings.setTurns(5); // queues a rerun through the change listener
+    headerCluster.cleanup();
+    await pending;
+    expect(document.querySelectorAll('.mox-cluster')).toHaveLength(0);
+    expect(headerCluster.isInitialized()).toBe(false);
+    expect(document.getElementById('mox-header-cluster-styles')).toBeNull();
+  });
+
   it('writes nothing when cleaned up during a refresh', async () => {
     const pending = headerCluster.refresh();
     headerCluster.cleanup();
