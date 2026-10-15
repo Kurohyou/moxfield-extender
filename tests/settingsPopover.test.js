@@ -285,6 +285,7 @@ describe('opening and closing', () => {
     click(q('input[name="oddsEnabled"]'));
     click(q('[data-step="turns-up"]'));
     click(q('.mox-settings'));
+    click(dialog()); // the popover's own padding
     document.body.removeEventListener('click', spy);
     expect(spy).not.toHaveBeenCalled();
   });

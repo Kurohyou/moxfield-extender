@@ -322,7 +322,8 @@
       curveEnabled: curveEnabled.input,
     };
 
-    root.addEventListener('click', (event) => onClick(s, event));
+    // On the popover element, so clicks on its padding stay in too.
+    container.addEventListener('click', (event) => onClick(s, event));
     root.addEventListener('change', (event) => onChange(s, event));
     budget.addEventListener('keydown', (event) => onBudgetKeydown(s, event));
     budget.addEventListener('blur', () => commitBudget(s));
