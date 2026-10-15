@@ -88,6 +88,18 @@ function q(selector) {
 }
 
 /**
+ * Whether a stepper button is at its limit: aria-disabled, but still
+ * focusable (never the disabled property, which would drop focus).
+ * @param {string} step - data-step value, e.g. 'turns-up'
+ * @returns {boolean}
+ */
+function inert(step) {
+  const button = q(`[data-step="${step}"]`);
+  expect(button.disabled).toBe(false);
+  return button.getAttribute('aria-disabled') === 'true';
+}
+
+/**
  * Click an element the way a user does: a bubbling, cancelable click.
  * Checkbox and radio inputs flip and fire change, as in a browser.
  * @param {HTMLElement} el
@@ -193,6 +205,7 @@ beforeEach(async () => {
 
   await import('../src/utils/storage.js');
   await import('../src/content/domHelpers.js');
+  await import('../src/content/oddsMath.js');
   await import('../src/content/deckSettings.js');
   await import('../src/content/popover.js');
   await import('../src/content/priceVisualization.js');
@@ -435,17 +448,31 @@ describe('budget', () => {
       expect(localStorage.getItem('mox-budget-abc')).toBeNull();
     });
 
-    it.each(['abc', '0', '-5', 'NaN', '12abc', 'Infinity'])(
-      'reverts invalid input %j to the stored value',
-      (text) => {
-        price.setBudgetGoal(40);
-        const input = typeBudget(text);
-        key(input, { key: 'Enter' });
-        expect(price.getState().budget).toBe(40);
-        expect(input.value).toBe('40');
-        expect(localStorage.getItem('mox-budget-abc')).toBe('40');
-      }
-    );
+    it('accepts thousands commas and decimals', () => {
+      const input = typeBudget('1,250.50');
+      key(input, { key: 'Enter' });
+      expect(price.getState().budget).toBe(1250.5);
+    });
+
+    it.each([
+      'abc',
+      '0',
+      '-5',
+      'NaN',
+      '12abc',
+      'Infinity',
+      '0x10',
+      '1e3',
+      '+5',
+      '1.2.3',
+    ])('reverts invalid input %j to the stored value', (text) => {
+      price.setBudgetGoal(40);
+      const input = typeBudget(text);
+      key(input, { key: 'Enter' });
+      expect(price.getState().budget).toBe(40);
+      expect(input.value).toBe('40');
+      expect(localStorage.getItem('mox-budget-abc')).toBe('40');
+    });
 
     it('reverts invalid input on blur too', () => {
       const input = typeBudget('nope');
@@ -468,13 +495,53 @@ describe('budget', () => {
       expect(input.value).toBe('12');
     });
 
-    it('Esc closes without committing, even if the browser then blurs', () => {
+    /**
+     * Make the popover fire blur on the budget field as it is removed, as
+     * Chrome does for a focused element, so the blur lands mid-close.
+     * @param {HTMLInputElement} input
+     */
+    function blurOnRemoval(input) {
+      const el = dialog();
+      const rm = el.remove.bind(el);
+      el.remove = () => {
+        input.dispatchEvent(new FocusEvent('blur'));
+        rm();
+      };
+    }
+
+    it.each([
+      [null, ''],
+      [40, '40'],
+    ])(
+      'Esc discards the edit even when the field blurs during removal (stored %s)',
+      (stored, shown) => {
+        price.setBudgetGoal(stored);
+        const input = typeBudget('33');
+        blurOnRemoval(input);
+        key(input, { key: 'Escape' });
+        expect(settingsPopover.isOpen()).toBe(false);
+        expect(price.getState().budget).toBe(stored);
+        expect(input.value).toBe(shown);
+        expect(localStorage.getItem('mox-budget-abc')).toBe(
+          stored === null ? null : shown
+        );
+      }
+    );
+
+    it('a blur during an outside-click close still commits once', () => {
       const input = typeBudget('33');
-      key(input, { key: 'Escape' });
-      expect(settingsPopover.isOpen()).toBe(false);
-      // Chrome fires blur on a focused element as it is removed.
-      input.dispatchEvent(new FocusEvent('blur'));
+      blurOnRemoval(input);
+      mouse(document.body, 'mousedown');
+      expect(price.getState().budget).toBe(33);
+    });
+
+    it('does not commit to another deck after a client-side navigation', () => {
+      const input = typeBudget('50');
+      window.history.pushState({}, '', '/decks/other');
+      key(input, { key: 'Enter' });
+      input.blur();
       expect(price.getState().budget).toBeNull();
+      expect(localStorage.getItem('mox-budget-other')).toBeNull();
       expect(localStorage.getItem('mox-budget-abc')).toBeNull();
     });
 
@@ -555,10 +622,10 @@ describe('Section odds group', () => {
     it('− is disabled at 0', async () => {
       deckSettings.setTurns(1);
       await openPopover();
-      expect(q('[data-step="turns-down"]').disabled).toBe(false);
+      expect(inert('turns-down')).toBe(false);
       click(q('[data-step="turns-down"]'));
       expect(deckSettings.get().turns).toBe(0);
-      expect(q('[data-step="turns-down"]').disabled).toBe(true);
+      expect(inert('turns-down')).toBe(true);
       expect(q('[data-value="turns"]').textContent).toBe('T0 · 7 cards seen');
     });
 
@@ -566,9 +633,9 @@ describe('Section odds group', () => {
       build({ library: 10 });
       badge.render();
       await openPopover();
-      expect(q('[data-step="turns-up"]').disabled).toBe(true);
+      expect(inert('turns-up')).toBe(true);
       click(q('[data-step="turns-down"]'));
-      expect(q('[data-step="turns-up"]').disabled).toBe(false);
+      expect(inert('turns-up')).toBe(false);
     });
 
     it('+ has no maximum when the Library is unreadable', async () => {
@@ -576,14 +643,14 @@ describe('Section odds group', () => {
       badge.render();
       deckSettings.setTurns(40);
       await openPopover();
-      expect(q('[data-step="turns-up"]').disabled).toBe(false);
+      expect(inert('turns-up')).toBe(false);
     });
 
     it('shows a stored T above the maximum as-is', async () => {
       deckSettings.setTurns(15);
       await openPopover();
       expect(q('[data-value="turns"]').textContent).toBe('T15 · 22 cards seen');
-      expect(q('[data-step="turns-up"]').disabled).toBe(true);
+      expect(inert('turns-up')).toBe(true);
       expect(deckSettings.get().turns).toBe(15);
     });
   });
@@ -592,7 +659,7 @@ describe('Section odds group', () => {
     it('shows the default desired; − is disabled at 1', async () => {
       await openPopover();
       expect(q('[data-value="desired"]').textContent).toBe('≥1');
-      expect(q('[data-step="desired-down"]').disabled).toBe(true);
+      expect(inert('desired-down')).toBe(true);
     });
 
     it('+ increments and − comes back down to 1', async () => {
@@ -600,10 +667,10 @@ describe('Section odds group', () => {
       click(q('[data-step="desired-up"]'));
       expect(deckSettings.get().desired).toBe(2);
       expect(q('[data-value="desired"]').textContent).toBe('≥2');
-      expect(q('[data-step="desired-down"]').disabled).toBe(false);
+      expect(inert('desired-down')).toBe(false);
       click(q('[data-step="desired-down"]'));
       expect(deckSettings.get().desired).toBe(1);
-      expect(q('[data-step="desired-down"]').disabled).toBe(true);
+      expect(inert('desired-down')).toBe(true);
     });
   });
 });
@@ -634,6 +701,123 @@ describe('Mana curve group', () => {
       true
     );
     expect(on.checked).toBe(true);
+  });
+});
+
+describe('stepper limits', () => {
+  it('keep focus on a button that reaches its limit', async () => {
+    deckSettings.setTurns(1);
+    await openPopover();
+    const down = q('[data-step="turns-down"]');
+    down.focus();
+    click(down);
+    expect(deckSettings.get().turns).toBe(0);
+    expect(inert('turns-down')).toBe(true);
+    expect(document.activeElement).toBe(down);
+  });
+
+  it('ignore clicks on a button at its limit', async () => {
+    build({ library: 10 });
+    badge.render();
+    await openPopover();
+    expect(inert('turns-up')).toBe(true);
+    click(q('[data-step="turns-up"]'));
+    expect(deckSettings.get().turns).toBe(3);
+  });
+});
+
+describe('focus', () => {
+  it('moves to the first enabled control on open', async () => {
+    await openPopover();
+    expect(document.activeElement).toBe(q('input[name="priceActive"]'));
+  });
+
+  it('skips a hidden or disabled price group', async () => {
+    settings({ priceVisualizationEnabled: false });
+    await openPopover();
+    expect(document.activeElement).toBe(q('input[name="oddsEnabled"]'));
+    settingsPopover.close();
+    settings({ priceVisualizationEnabled: true });
+    build({ priced: false });
+    badge.render();
+    await openPopover();
+    expect(document.activeElement).toBe(q('input[name="oddsEnabled"]'));
+  });
+
+  it('returns to the badge segment it came from on Esc', async () => {
+    const seg = badgeRoot().querySelector('[data-seg="odds"]');
+    seg.focus();
+    mouse(seg, 'contextmenu'); // Shift+F10 / the menu key on a focused segment
+    await settle();
+    expect(settingsPopover.isOpen()).toBe(true);
+    key(document.activeElement, { key: 'Escape' });
+    expect(settingsPopover.isOpen()).toBe(false);
+    expect(document.activeElement).toBe(seg);
+  });
+
+  it('returns to the badge when opened by mouse', async () => {
+    document.body.focus();
+    await openPopover();
+    settingsPopover.close();
+    expect(badgeRoot().contains(document.activeElement)).toBe(true);
+    expect(document.activeElement.tabIndex).toBe(0);
+  });
+
+  it('is left alone when it had already moved out of the popover', async () => {
+    await openPopover();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    settingsPopover.close();
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('is left alone when it moved out of the popover and then away', async () => {
+    await openPopover();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    outside.blur(); // focus on the body, but not lost from the popover
+    settingsPopover.close();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('is left alone when the badge has gone', async () => {
+    await openPopover();
+    settings({
+      priceVisualizationEnabled: false,
+      sectionCurveEnabled: false,
+    });
+    click(q('input[name="oddsEnabled"]')); // last feature off: badge removed
+    await settle();
+    expect(settingsPopover.isOpen()).toBe(false);
+    expect(badgeRoot()).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe('last visible feature', () => {
+  it('closes the popover with the badge when it is turned off', async () => {
+    settings({ priceVisualizationEnabled: false, sectionCurveEnabled: false });
+    badge.render();
+    await openPopover();
+    click(q('input[name="oddsEnabled"]'));
+    await Promise.resolve(); // the primitive's anchor observer
+    expect(settingsPopover.isOpen()).toBe(false);
+    expect(dialog()).toBeNull();
+  });
+});
+
+describe('live region', () => {
+  it('stays quiet for the initial load, then announces steps', async () => {
+    settingsPopover.open(badgeRoot());
+    const value = q('[data-value="turns"]');
+    expect(value.hasAttribute('aria-live')).toBe(false);
+    await settle();
+    expect(value.getAttribute('aria-live')).toBe('polite');
+    expect(q('[data-value="desired"]').getAttribute('aria-live')).toBe(
+      'polite'
+    );
   });
 });
 

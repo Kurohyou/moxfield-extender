@@ -15,11 +15,14 @@
 
   const STYLE_ID = 'mox-settings-popover-styles';
   const LABEL = 'Moxfield Extended settings';
-  // Cards in the opening hand: by turn T you have seen 7 + T (spec 2.5).
-  const OPENING_HAND = 7;
   const PRICE_HINT = `Turn on Price in Moxfield's view options`;
   const OVERRIDE_HINT = `Per-Section: right-click a Section's %, or hover a Section and press Alt+= / Alt+−`;
   const MINUS = '−';
+  // A plain decimal, after a leading $ and thousands commas are stripped.
+  // Rejects signs, hex and exponent forms that Number() would accept.
+  const BUDGET_PATTERN = /^\d*\.?\d+$/;
+  // Controls that can take focus; filtered for hidden and disabled at use.
+  const FOCUSABLE = 'input, button, [tabindex="0"]';
 
   const CSS = `
 .mox-settings {
@@ -108,7 +111,8 @@
 }
 /* Dim once: a disabled group dims its rows, not each control again. */
 .mox-settings__group:not(:disabled) :disabled,
-.mox-settings__group:disabled > .mox-settings__row {
+.mox-settings__group:disabled > .mox-settings__row,
+.mox-settings__step[aria-disabled='true'] {
   opacity: 0.5;
   cursor: default;
 }
@@ -123,7 +127,7 @@
 }
 `;
 
-  // The open session: { handle, ui, closed, escaping, ...listeners }, or null.
+  // The open session: { handle, ui, closed, deckId, focusInside, ...listeners }, or null.
   let session = null;
 
   /**
@@ -229,9 +233,10 @@
     down.type = 'button';
     down.dataset.step = `${key}-down`;
     down.setAttribute('aria-label', lower);
+    // aria-live is added after the first loaded render (see open()), so the
+    // jump from defaults to this deck's values is not announced.
     const value = make('span', 'mox-settings__value');
     value.dataset.value = key;
-    value.setAttribute('aria-live', 'polite');
     const up = make('button', 'mox-settings__step', '+');
     up.type = 'button';
     up.dataset.step = `${key}-up`;
@@ -327,6 +332,17 @@
     root.addEventListener('change', (event) => onChange(s, event));
     budget.addEventListener('keydown', (event) => onBudgetKeydown(s, event));
     budget.addEventListener('blur', () => commitBudget(s));
+    // Whether focus is in the popover, for returning it on close. Focus
+    // leaving to nowhere (relatedTarget null) keeps the flag: Chrome blurs a
+    // focused element as the popover is removed, which is not the user
+    // moving focus away.
+    container.addEventListener('focusin', () => {
+      s.focusInside = true;
+    });
+    container.addEventListener('focusout', (event) => {
+      const to = event.relatedTarget;
+      if (to && !container.contains(to)) s.focusInside = false;
+    });
     return ui;
   }
 
@@ -347,8 +363,9 @@
   function parseBudget(text) {
     const cleaned = text.trim().replace(/^\$/, '').replace(/,/g, '').trim();
     if (cleaned === '') return { clear: true };
+    if (!BUDGET_PATTERN.test(cleaned)) return null;
     const value = Number(cleaned);
-    return Number.isFinite(value) && value > 0 ? { value } : null;
+    return value > 0 ? { value } : null;
   }
 
   /**
@@ -368,14 +385,16 @@
   /**
    * Commit the budget field: a valid number sets it, empty clears it, and
    * anything else is dropped. The field then shows the stored value, even
-   * while focused (normalised, or reverted). Skipped once Esc has been
-   * pressed or the popover has closed, so Esc discards the edit.
+   * while focused (normalised, or reverted). Skipped once the popover has
+   * closed, and when the page has moved to another deck since it opened:
+   * the budget is stored per deck, under the current URL's deck.
    * @param {Object} s - The session
    */
   function commitBudget(s) {
-    if (s.closed || s.escaping || !s.ui) return;
+    if (s.closed || !s.ui) return;
     const input = s.ui.budget;
     if (input.disabled) return;
+    if (ns().domHelpers?.getDeckId?.() !== s.deckId) return;
     const parsed = parseBudget(input.value);
     const price = ns().priceVisualization;
     if (parsed?.clear) price?.setBudgetGoal?.(null);
@@ -397,14 +416,16 @@
   }
 
   /**
-   * Stepper buttons; every click stays inside the popover.
+   * Stepper buttons; every click stays inside the popover. A button at its
+   * limit is aria-disabled rather than disabled, so it keeps focus; its
+   * clicks are ignored here.
    * @param {Object} s - The session
    * @param {MouseEvent} event
    */
   function onClick(s, event) {
     event.stopPropagation();
     const button = event.target?.closest?.('[data-step]');
-    if (!button || button.disabled) return;
+    if (!button || button.getAttribute('aria-disabled') === 'true') return;
     const { deckSettings } = ns();
     const current = deckSettings?.get?.();
     if (!current) return;
@@ -478,19 +499,82 @@
       turns: 3,
       desired: 1,
     };
+    // Cards seen by turn T: the opening hand plus T (spec 2.5).
+    const seen = ns().oddsMath?.OPENING_HAND + turns;
     const library = domHelpers?.readLibrary?.();
     // No maximum when the Library is unreadable; a stored T above it shows as-is.
-    const atMax = Boolean(library?.ok) && OPENING_HAND + turns >= library.value;
-    setProp(
-      ui.turns.value,
-      'textContent',
-      `T${turns} · ${OPENING_HAND + turns} cards seen`
-    );
-    setProp(ui.turns.down, 'disabled', turns <= 0);
-    setProp(ui.turns.up, 'disabled', atMax);
+    const atMax = Boolean(library?.ok) && seen >= library.value;
+    setProp(ui.turns.value, 'textContent', `T${turns} · ${seen} cards seen`);
+    setInert(ui.turns.down, turns <= 0);
+    setInert(ui.turns.up, atMax);
 
     setProp(ui.desired.value, 'textContent', `≥${desired}`);
-    setProp(ui.desired.down, 'disabled', desired <= 1);
+    setInert(ui.desired.down, desired <= 1);
+  }
+
+  /**
+   * Mark a stepper button as at its limit (or not), only when it differs.
+   * @param {HTMLButtonElement} button
+   * @param {boolean} inert
+   */
+  function setInert(button, inert) {
+    if ((button.getAttribute('aria-disabled') === 'true') === inert) return;
+    if (inert) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+  }
+
+  /**
+   * Turn on the value live regions, once. Called after the first render with
+   * this deck's settings, so that initial jump is not announced.
+   * @param {Object} ui
+   */
+  function enableLiveRegions(ui) {
+    [ui.turns.value, ui.desired.value].forEach((value) => {
+      if (value.getAttribute('aria-live') !== 'polite') {
+        value.setAttribute('aria-live', 'polite');
+      }
+    });
+  }
+
+  /**
+   * Whether a control can take focus now: not disabled, not aria-disabled,
+   * and not inside anything hidden.
+   * @param {HTMLElement} el
+   * @returns {boolean}
+   */
+  function canFocus(el) {
+    return (
+      !el.matches(':disabled') &&
+      el.getAttribute('aria-disabled') !== 'true' &&
+      !el.closest('[hidden]')
+    );
+  }
+
+  /**
+   * Focus the first control that can take focus.
+   * @param {HTMLElement} root
+   */
+  function focusFirst(root) {
+    const first = [...root.querySelectorAll(FOCUSABLE)].find(canFocus);
+    first?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Where focus goes back to on close: the badge segment it came from (the
+   * menu key on a focused segment opens the popover), else the anchor if it
+   * is focusable, else its first focusable control.
+   * @param {Element} anchorEl
+   * @param {Element|null} from - document.activeElement when opened
+   * @returns {HTMLElement|null}
+   */
+  function returnTarget(anchorEl, from) {
+    if (from && anchorEl.contains(from) && from.tabIndex >= 0) return from;
+    if (anchorEl.tabIndex >= 0) return anchorEl;
+    return (
+      [...anchorEl.querySelectorAll(FOCUSABLE)].find(
+        (el) => el.tabIndex >= 0 && canFocus(el)
+      ) || null
+    );
   }
 
   /**
@@ -504,15 +588,24 @@
   /**
    * Remove the session's listeners. Runs once, from the primitive's onClose,
    * which covers Esc, an outside click, the anchor leaving and another popover
-   * opening.
+   * opening. If focus was in the popover and has not gone anywhere else,
+   * it goes back to the badge; if the badge has gone, it is left alone.
    * @param {Object} s - The session
+   * @param {Element} anchorEl
    */
-  function teardown(s) {
+  function teardown(s, anchorEl) {
     s.closed = true;
     if (session === s) session = null;
     ns().deckSettings?.events?.removeEventListener('change', s.onDeckChange);
     window.removeEventListener('keydown', s.onWindowKeydown, true);
     window.removeEventListener('mousedown', s.onWindowMousedown, true);
+
+    const active = document.activeElement;
+    const focusLost =
+      !active || active === document.body || !active.isConnected;
+    if (s.focusInside && focusLost && anchorEl.isConnected) {
+      returnTarget(anchorEl, s.openedFrom)?.focus({ preventScroll: true });
+    }
   }
 
   /**
@@ -525,13 +618,25 @@
     if (!popover || !anchorEl) return;
     ensureStyles();
 
-    const s = { handle: null, ui: null, closed: false, escaping: false };
+    const s = {
+      handle: null,
+      ui: null,
+      closed: false,
+      focusInside: false,
+      // The budget is stored per deck: commit only to the deck it opened on.
+      deckId: domHelpers?.getDeckId?.() ?? null,
+      openedFrom: document.activeElement,
+    };
     s.onDeckChange = () => redraw(s);
-    // Window capture runs before the primitive's document-capture Esc
-    // handler, which removes the popover. Chrome blurs the focused budget
-    // field as it goes; this flag keeps that blur from committing.
+    // Esc discards a budget edit. Window capture runs before the primitive's
+    // document-capture Esc handler, which removes the popover; Chrome blurs
+    // the focused field as it goes. Reverting the field first makes that
+    // blur commit the stored value, a no-op.
     s.onWindowKeydown = (event) => {
-      if (event.key === 'Escape') s.escaping = true;
+      if (event.key !== 'Escape' || !s.ui) return;
+      if (document.activeElement === s.ui.budget) {
+        setProp(s.ui.budget, 'value', formatBudget(priceState().budget));
+      }
     };
     // An outside click closes the popover before the field would blur, and
     // jsdom and Firefox fire no blur on removal: commit first.
@@ -547,16 +652,19 @@
         if (!s.ui) s.ui = build(s, container);
         update(s.ui);
       },
-      { label: LABEL, onClose: () => teardown(s) }
+      { label: LABEL, onClose: () => teardown(s, anchorEl) }
     );
     session = s;
 
     deckSettings?.events?.addEventListener('change', s.onDeckChange);
     window.addEventListener('keydown', s.onWindowKeydown, true);
     window.addEventListener('mousedown', s.onWindowMousedown, true);
+    if (s.ui) focusFirst(s.ui.root);
 
-    const deckId = domHelpers?.getDeckId?.();
-    Promise.resolve(deckSettings?.ensureLoaded?.(deckId)).then(() => redraw(s));
+    Promise.resolve(deckSettings?.ensureLoaded?.(s.deckId)).then(() => {
+      redraw(s);
+      if (!s.closed && s.ui) enableLiveRegions(s.ui);
+    });
   }
 
   /**

@@ -148,6 +148,7 @@
   if (typeof window !== 'undefined') {
     window.MoxfieldExtended = window.MoxfieldExtended || {};
     window.MoxfieldExtended.oddsMath = {
+      OPENING_HAND,
       evaluate,
       libraryError,
     };

@@ -282,3 +282,9 @@ describe('evaluate input validation', () => {
     ).not.toThrow();
   });
 });
+
+describe('OPENING_HAND', () => {
+  it('is the 7-card opening hand, shared with the settings popover', () => {
+    expect(oddsMath.OPENING_HAND).toBe(7);
+  });
+});
