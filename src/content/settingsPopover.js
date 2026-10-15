@@ -20,7 +20,8 @@
   const MINUS = '−';
   // A plain decimal, after a leading $ and thousands commas are stripped.
   // Rejects signs, hex and exponent forms that Number() would accept.
-  const BUDGET_PATTERN = /^\d*\.?\d+$/;
+  // Accepts '50', '50.', '50.5' and '.5'.
+  const BUDGET_PATTERN = /^(\d+\.?\d*|\.\d+)$/;
   // Controls that can take focus; filtered for hidden and disabled at use.
   const FOCUSABLE = 'input, button, [tabindex="0"]';
 
@@ -500,7 +501,8 @@
       desired: 1,
     };
     // Cards seen by turn T: the opening hand plus T (spec 2.5).
-    const seen = ns().oddsMath?.OPENING_HAND + turns;
+    // The fallback only guards a missing oddsMath; it is the same 7.
+    const seen = (ns().oddsMath?.OPENING_HAND ?? 7) + turns;
     const library = domHelpers?.readLibrary?.();
     // No maximum when the Library is unreadable; a stored T above it shows as-is.
     const atMax = Boolean(library?.ok) && seen >= library.value;
@@ -638,12 +640,15 @@
         setProp(s.ui.budget, 'value', formatBudget(priceState().budget));
       }
     };
-    // An outside click closes the popover before the field would blur, and
-    // jsdom and Firefox fire no blur on removal: commit first.
+    // A mousedown outside the popover: focus belongs where the user clicked,
+    // so a mouse close never pulls it back to the badge (that is only for
+    // keyboard and programmatic closes). It also closes the popover before
+    // the budget field would blur, and jsdom and Firefox fire no blur on
+    // removal: commit first.
     s.onWindowMousedown = (event) => {
-      if (s.ui && document.activeElement === s.ui.budget) {
-        if (!s.handle?.el.contains(event.target)) commitBudget(s);
-      }
+      if (!s.ui || s.handle?.el.contains(event.target)) return;
+      s.focusInside = false;
+      if (document.activeElement === s.ui.budget) commitBudget(s);
     };
 
     s.handle = popover.open(

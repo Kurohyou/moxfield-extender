@@ -455,6 +455,17 @@ describe('budget', () => {
     });
 
     it.each([
+      ['50.', 50],
+      ['.5', 0.5],
+      ['0.75', 0.75],
+    ])('accepts %j', (text, value) => {
+      const input = typeBudget(text);
+      key(input, { key: 'Enter' });
+      expect(price.getState().budget).toBe(value);
+    });
+
+    it.each([
+      '.',
       'abc',
       '0',
       '-5',
@@ -755,12 +766,38 @@ describe('focus', () => {
     expect(document.activeElement).toBe(seg);
   });
 
+  it('shows cards seen even without oddsMath loaded', async () => {
+    delete window.MoxfieldExtended.oddsMath;
+    await openPopover();
+    expect(q('[data-value="turns"]').textContent).toBe('T3 · 10 cards seen');
+  });
+
   it('returns to the badge when opened by mouse', async () => {
     document.body.focus();
     await openPopover();
     settingsPopover.close();
     expect(badgeRoot().contains(document.activeElement)).toBe(true);
     expect(document.activeElement.tabIndex).toBe(0);
+  });
+
+  it('is not pulled back to the badge by an outside click', async () => {
+    const seg = badgeRoot().querySelector('[data-seg="odds"]');
+    seg.focus();
+    mouse(seg, 'contextmenu');
+    await settle();
+    expect(q('.mox-settings').contains(document.activeElement)).toBe(true);
+    mouse(document.body, 'mousedown');
+    expect(settingsPopover.isOpen()).toBe(false);
+    expect(badgeRoot().contains(document.activeElement)).toBe(false);
+  });
+
+  it('is not pulled back to the badge by an outside click from the budget', async () => {
+    price.setDeckWide(true);
+    await openPopover();
+    typeBudget('25');
+    mouse(document.body, 'mousedown');
+    expect(price.getState().budget).toBe(25);
+    expect(badgeRoot().contains(document.activeElement)).toBe(false);
   });
 
   it('is left alone when it had already moved out of the popover', async () => {
