@@ -27,6 +27,10 @@
     priceVisualizationActive: settings.priceVisualizationActive,
   };
 
+  // The badge owns Alt+O / Alt+M, which must work while every feature is
+  // off, so it is initialised once on every deck page (plan Pitfall 8).
+  window.MoxfieldExtended.badge?.init?.();
+
   // Initialize features based on settings
   initFeatures(settings);
 
@@ -42,16 +46,25 @@
     return false;
   });
 
+  // Runtime price-bar state, written on every price click. It changes no
+  // feature, so it only redraws the badge.
+  const PRICE_STATE_KEYS = new Set([
+    'priceVisualizationActive',
+    'priceVisualizationDeckWide',
+  ]);
+
   /**
    * React to chrome.storage changes.
    * - sync: known setting keys are merged into state.settings and features re-run
    *   (initFeatures is idempotent: each init/cleanup checks its own state).
+   *   A change of only the runtime price state just redraws the badge.
    * - local: a change to the current deck's key goes to deckSettings.applyExternal.
    * @param {Object} changes - Map of key to { oldValue, newValue }
    * @param {string} area - 'sync' | 'local' | 'managed'
    */
   function handleStorageChanged(changes, area) {
-    const { state, storage, domHelpers, deckSettings } = window.MoxfieldExtended;
+    const { state, storage, domHelpers, deckSettings, badge } =
+      window.MoxfieldExtended;
 
     if (area === 'sync') {
       const known = new Set([...Object.keys(storage.DEFAULT_SETTINGS), 'priceVisualizationDeckWide']);
@@ -61,9 +74,14 @@
         // A removed key (no newValue) falls back to its default.
         updates[key] = 'newValue' in changes[key] ? changes[key].newValue : storage.DEFAULT_SETTINGS[key];
       });
-      if (Object.keys(updates).length > 0) {
+      const keys = Object.keys(updates);
+      if (keys.length > 0) {
         Object.assign(state.settings, updates);
-        initFeatures(state.settings);
+        if (keys.every((key) => PRICE_STATE_KEYS.has(key))) {
+          badge?.render?.();
+        } else {
+          initFeatures(state.settings);
+        }
       }
     } else if (area === 'local') {
       const deckId = domHelpers.getDeckId();
@@ -121,7 +139,36 @@ function initFeatures(settings) {
     }
   }
 
+  // Features 3 and 4: Section odds and Section mana curve share the header
+  // cluster. refresh() initialises it lazily and removes everything in
+  // goldfish mode.
+  if (settings.sectionOddsEnabled || settings.sectionCurveEnabled) {
+    console.log(LOG_PREFIX, 'Section odds / mana curve: ENABLED');
+    refreshHeaders();
+  } else {
+    console.log(LOG_PREFIX, 'Section odds / mana curve: DISABLED');
+    window.MoxfieldExtended?.headerCluster?.cleanup?.();
+  }
 
+  // The badge follows every settings change, whatever is on.
+  window.MoxfieldExtended?.badge?.render?.();
+}
+
+/**
+ * Refresh the Section header clusters, logging a failed refresh instead of
+ * leaving an unhandled rejection.
+ */
+function refreshHeaders() {
+  const headerCluster = window.MoxfieldExtended?.headerCluster;
+  if (!headerCluster?.refresh) return;
+  const warn = (error) =>
+    console.warn('[Moxfield Extended]', 'Could not refresh Section headers', error);
+  try {
+    // Called synchronously, so a cleanup() that follows it still wins.
+    Promise.resolve(headerCluster.refresh()).catch(warn);
+  } catch (error) {
+    warn(error);
+  }
 }
 
 /**
@@ -160,6 +207,15 @@ function setupMutationObserver() {
             window.MoxfieldExtended.priceVisualization.refresh();
           }
         }
+
+        // Section odds and mana curve. Moxfield navigates client-side and
+        // this script runs once, so every refresh re-checks goldfish mode:
+        // headerCluster and the badge both remove themselves there.
+        const { settings } = window.MoxfieldExtended.state;
+        if (settings.sectionOddsEnabled || settings.sectionCurveEnabled) {
+          refreshHeaders();
+        }
+        window.MoxfieldExtended?.badge?.render?.();
       }, 250);
     }
   });
