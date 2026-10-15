@@ -37,6 +37,28 @@ describe('buildDeck', () => {
     expect(document.querySelector('div.text-nowrap.d-inline-block')).toBeNull();
   });
 
+  it('returns footer and select, and supports footerText', () => {
+    const { footer, select } = buildDeck({ footerText: 'abc main deck', footerCount: 5, groupBy: 'type' });
+    expect(footer.querySelector('div.text-nowrap.d-inline-block').textContent).toBe('abc main deck');
+    expect(select.value).toBe('type');
+    expect(buildDeck({ footerText: '' }).footer.querySelector('div.text-nowrap.d-inline-block').textContent).toBe('');
+    expect(buildDeck({}).footer).toBeNull();
+  });
+
+  it('throws on an unknown groupBy', () => {
+    expect(() => buildDeck({ groupBy: 'nope' })).toThrow(/unknown groupBy/);
+  });
+
+  it('sets names and prices as text, not markup, and resets generated hashes', () => {
+    const rows = [{ name: '<b>x</b>' }];
+    const { sections } = buildDeck({ sections: [{ title: 'Lands', price: '$1 <i>', rows }] });
+    expect(sections[0].ul.querySelector('li[data-hash] .underline').textContent).toBe('<b>x</b>');
+    expect(sections[0].ul.querySelector('li[data-hash] b')).toBeNull();
+    expect(sections[0].headerLi.querySelector('span.text-nowrap.fw-normal').textContent).toBe('– $1 <i>');
+    const hashOf = () => buildDeck({ sections: [{ title: 'Lands', rows: [{}] }] }).sections[0].ul.lastElementChild.dataset.hash;
+    expect(hashOf()).toBe(hashOf());
+  });
+
   it('loads fixtures as strings', () => {
     expect(loadFixture('footer')).toContain('136 main deck');
   });

@@ -53,3 +53,13 @@ an unknown suffix as 1 (the default).
 No Sideboard header was captured. `buildDeck` synthesizes `Commander` and
 `Sideboard` headers from `header-commander-single-no-price.html` with the
 title and count swapped.
+
+## Test harness notes
+
+`tests/setup/chromeStub.js` resets the chrome stub, including every registered
+listener, in a global `beforeEach`. A script that registers listeners while it
+loads (for example `index.js` adding `runtime.onMessage` or
+`storage.onChanged` listeners) must be loaded inside the test or a
+`beforeEach`, after the reset, with `vi.resetModules()` followed by
+`await import(...)`. A top-level import's listeners are wiped before the first
+test runs.

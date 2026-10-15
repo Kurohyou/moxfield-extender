@@ -9,6 +9,12 @@
  *   `window.MoxfieldExtended = window.MoxfieldExtended || {}` guard only
  *   preserves the namespace object, not the module objects inside it.
  *   A plain re-import without resetModules() is cached and does nothing.
+ * - LISTENERS AND __reset: `chrome.__reset()` runs in a global beforeEach and
+ *   clears all listeners. A script that registers a listener while it loads
+ *   (for example index.js adding runtime.onMessage or storage.onChanged
+ *   listeners) must therefore be loaded inside the test or a beforeEach, i.e.
+ *   after the reset, via `vi.resetModules()` + `await import(...)`. A
+ *   top-level import's listeners are wiped before the first test runs.
  * - requestAnimationFrame: jsdom (vitest) provides it, but it is asynchronous
  *   (~16ms timer), so tests would need to wait. It is replaced with a
  *   synchronous version (callback runs immediately, returns an id) so that
@@ -17,24 +23,37 @@
  * - ResizeObserver is missing from jsdom, so a no-op class is stubbed below.
  * - jsdom reports every layout width/height as 0. Layout tests assert that
  *   nodes exist, never that they are visible.
+ *
+ * Storage timing, modelled on real chrome.storage:
+ * - The store is updated synchronously inside get/set/remove.
+ * - Callbacks (and promises) resolve asynchronously, via a microtask, so a
+ *   callback never runs before the call returns.
+ * - onChanged listeners fire after the write and before the callback or
+ *   promise completes.
+ * - A write whose new value deep-equals the old one produces no change entry
+ *   (Chromium's value store only records differing values), and onChanged does
+ *   not fire when no entry remains.
  */
+import { isDeepStrictEqual } from 'node:util';
 import { beforeEach } from 'vitest';
 
 const stores = { sync: {}, local: {} };
 let changeListeners = [];
 let messageListeners = [];
 
+const has = (data, key) => Object.hasOwn(data, key);
 const clone = (value) => (value === undefined ? undefined : structuredClone(value));
 
 /**
  * Support both the callback and the promise form of a chrome API.
+ * The callback runs in a microtask, never before the API call returns.
  * @param {Function|undefined} callback
  * @param {*} result
  * @returns {Promise<*>|undefined}
  */
 function respond(callback, result) {
   if (typeof callback === 'function') {
-    callback(result);
+    queueMicrotask(() => callback(result));
     return undefined;
   }
   return Promise.resolve(result);
@@ -42,7 +61,7 @@ function respond(callback, result) {
 
 function fireChanged(changes, areaName) {
   if (Object.keys(changes).length === 0) return;
-  changeListeners.slice().forEach((listener) => listener(changes, areaName));
+  changeListeners.slice().forEach((listener) => listener(clone(changes), areaName));
 }
 
 function createArea(areaName) {
@@ -64,14 +83,14 @@ function createArea(areaName) {
           result[key] = clone(data[key]);
         });
       } else if (typeof keys === 'string') {
-        if (keys in data) result[keys] = clone(data[keys]);
+        if (has(data, keys)) result[keys] = clone(data[keys]);
       } else if (Array.isArray(keys)) {
         keys.forEach((key) => {
-          if (key in data) result[key] = clone(data[key]);
+          if (has(data, key)) result[key] = clone(data[key]);
         });
       } else {
         Object.keys(keys).forEach((key) => {
-          result[key] = key in data ? clone(data[key]) : clone(keys[key]);
+          result[key] = has(data, key) ? clone(data[key]) : clone(keys[key]);
         });
       }
       return respond(callback, result);
@@ -81,11 +100,12 @@ function createArea(areaName) {
       const data = area();
       const changes = {};
       Object.keys(items).forEach((key) => {
-        const oldValue = clone(data[key]);
+        const hadValue = has(data, key);
+        const oldValue = data[key];
         const newValue = clone(items[key]);
         data[key] = newValue;
-        changes[key] = { oldValue, newValue: clone(newValue) };
-        if (oldValue === undefined) delete changes[key].oldValue;
+        if (hadValue && isDeepStrictEqual(oldValue, newValue)) return;
+        changes[key] = hadValue ? { oldValue: clone(oldValue), newValue } : { newValue };
       });
       fireChanged(changes, areaName);
       return respond(callback, undefined);
@@ -95,7 +115,7 @@ function createArea(areaName) {
       const data = area();
       const changes = {};
       (Array.isArray(keys) ? keys : [keys]).forEach((key) => {
-        if (key in data) {
+        if (has(data, key)) {
           changes[key] = { oldValue: clone(data[key]) };
           delete data[key];
         }

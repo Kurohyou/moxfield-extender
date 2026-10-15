@@ -71,7 +71,8 @@ function buildRow({ qty = 1, owner = false, cost = null, hash, name }) {
   const link = row.querySelector('a.table-deck-row-link');
   link.removeAttribute('id');
   link.setAttribute('href', `/cards/${rowHash}`);
-  link.innerHTML = `<span><span class="text-nowrap underline">${name ?? `Card ${rowHash}`}</span></span>`;
+  link.innerHTML = '<span><span class="text-nowrap underline"></span></span>';
+  link.querySelector('.underline').textContent = name ?? `Card ${rowHash}`;
 
   row.querySelector('div.text-nowrap.text-end').innerHTML = costMarkup(cost);
   return row;
@@ -94,7 +95,7 @@ function buildHeader({ title, count, price }) {
       const priced = parseFixture('header-with-price');
       header.appendChild(priced.querySelector('span.text-nowrap.fw-normal'));
     }
-    header.querySelector('span.text-nowrap.fw-normal').innerHTML = `–&nbsp;${price}`;
+    header.querySelector('span.text-nowrap.fw-normal').textContent = `– ${price}`;
   }
   return header;
 }
@@ -103,13 +104,18 @@ function buildHeader({ title, count, price }) {
  * Build a deck page into document.body (replacing its content).
  * @param {Object} options
  * @param {number|null} [options.footerCount] - "N main deck" footer; omitted when null/undefined
- * @param {string} [options.groupBy] - Selected value of select#groupBy; omitted when not given
+ * @param {string|null} [options.footerText] - Raw text for the main-deck div (e.g. 'abc main deck' or ''),
+ *   for garbled-footer tests; wins over footerCount when both are given
+ * @param {string} [options.groupBy] - Selected value of select#groupBy; omitted when not given.
+ *   Throws if it is not one of the captured options.
  * @param {Array<{title: string, count?: number, price?: string,
  *   rows: Array<{qty?: number, owner?: boolean, cost?: string[]|string[][]|null, hash?: string, name?: string}>}>} options.sections
  *   `count` defaults to the sum of row qty; `price` is the display text, e.g. '$61.22'.
- * @returns {{root: Element, sections: Array<{ul: Element, headerLi: Element}>}}
+ * @returns {{root: Element, sections: Array<{ul: Element, headerLi: Element}>,
+ *   footer: Element|null, select: HTMLSelectElement|null}}
  */
-export function buildDeck({ footerCount, groupBy, sections = [] } = {}) {
+export function buildDeck({ footerCount, footerText, groupBy, sections = [] } = {}) {
+  hashCounter = 0;
   document.body.innerHTML = '';
 
   const root = document.createElement('section');
@@ -128,17 +134,23 @@ export function buildDeck({ footerCount, groupBy, sections = [] } = {}) {
   });
   document.body.appendChild(root);
 
-  if (footerCount != null) {
-    const footer = parseFixture('footer');
-    footer.querySelector('div.text-nowrap.d-inline-block').textContent = `${footerCount} main deck`;
+  let footer = null;
+  const mainDeckText = footerText ?? (footerCount != null ? `${footerCount} main deck` : null);
+  if (mainDeckText != null) {
+    footer = parseFixture('footer');
+    footer.querySelector('div.text-nowrap.d-inline-block').textContent = mainDeckText;
     document.body.appendChild(footer);
   }
 
+  let select = null;
   if (groupBy != null) {
-    const select = parseFixture('groupby-select');
+    select = parseFixture('groupby-select');
+    if (!Array.from(select.options).some((option) => option.value === groupBy)) {
+      throw new Error(`buildDeck: unknown groupBy "${groupBy}"`);
+    }
     select.value = groupBy;
     document.body.appendChild(select);
   }
 
-  return { root, sections: built };
+  return { root, sections: built, footer, select };
 }
