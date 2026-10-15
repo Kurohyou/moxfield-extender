@@ -3,19 +3,16 @@
  * Provides functions to interact with Moxfield's DOM structure
  */
 
-// Selectors based on PRD DOM Reference (Section 15)
+// Selectors observed on live Moxfield deck pages (table view, October 2026).
+// Moxfield ships hashed class names, so prefer data-testid and structural anchors.
 const SELECTORS = {
-  // Section headers in main deck (Creatures, Instants, etc.)
-  sectionHeader: 'a.table-deck-row-link.fw-bold',
-
-  // Alternative section header selector
-  sectionHeaderAlt: 'a.d-inline-block.text-body.no-outline.fw-bold.table-deck-row-link',
+  // Section headers (Commander, Creatures, Instants, etc.). Each Section is its
+  // own <ul> inside the deck-list <article>, with the header as its first <li>.
+  // Scoping to the article keeps out the mana-curve panel, which reuses the markup.
+  sectionHeader: 'section.deckview article > ul > li:first-child > a.table-deck-row-link',
 
   // Card entries in a section
-  cardEntry: 'li[id^="id56-"]',
-
-  // Card entry by class (more reliable)
-  cardEntryClass: 'li.XIi4jFys2lGhYwseGpBo',
+  cardEntry: 'li[data-testid="deck-view-table-row"]',
 
   // Special sections (Considering, Tokens)
   specialSectionHeader: 'div.cursor-pointer strong',
@@ -58,36 +55,20 @@ function getSectionHeaders() {
 
 /**
  * Get all card entries within a section
- * Cards are siblings following the header until the next header
+ * Cards are the rows of the <ul> whose first <li> holds the header.
+ * Special-section headers (Considering, Tokens) are not inside such a list,
+ * so they return no cards.
  * @param {Element} headerElement - Section header element
  * @returns {Element[]} Array of card entry elements
  */
 function getCardsInSection(headerElement) {
-  const cards = [];
-
-  // Navigate to the parent container and find subsequent card entries
-  let parent = headerElement.closest('li') || headerElement.parentElement;
-  if (!parent) return cards;
-
-  let sibling = parent.nextElementSibling;
-
-  while (sibling) {
-    // Stop if we hit another section header
-    if (sibling.querySelector(SELECTORS.sectionHeader) ||
-      sibling.querySelector(SELECTORS.specialSectionHeader)) {
-      break;
-    }
-
-    // Check if this is a card entry
-    if (sibling.matches(SELECTORS.cardEntryClass) ||
-      sibling.id?.startsWith('id56-')) {
-      cards.push(sibling);
-    }
-
-    sibling = sibling.nextElementSibling;
+  const headerItem = headerElement.closest('li');
+  const list = headerItem?.parentElement;
+  if (!list || list.tagName !== 'UL' || list.firstElementChild !== headerItem) {
+    return [];
   }
 
-  return cards;
+  return Array.from(list.children).filter((child) => child.matches(SELECTORS.cardEntry));
 }
 
 /**
@@ -96,7 +77,7 @@ function getCardsInSection(headerElement) {
  */
 function isPriceEnabled() {
   // Look for price elements in card entries - price shows as $X.XX
-  const cards = document.querySelectorAll(SELECTORS.cardEntryClass);
+  const cards = document.querySelectorAll(SELECTORS.cardEntry);
   if (cards.length === 0) return false;
 
   // Check if any card has a price value visible
@@ -127,9 +108,14 @@ function extractPrice(cardElement) {
  * @returns {number} Quantity (defaults to 1)
  */
 function extractQuantity(cardElement) {
-  const text = cardElement.textContent.trim();
-  const match = text.match(/^(\d+)\s/);
-  return match ? parseInt(match[1]) : 1;
+  // The first cell holds the quantity: plain text for viewers, an <input> on
+  // decks the viewer owns (where textContent is empty).
+  const cell = cardElement.firstElementChild;
+  if (!cell) return 1;
+
+  const input = cell.querySelector('input');
+  const quantity = parseInt((input ? input.value : cell.textContent).trim(), 10);
+  return Number.isNaN(quantity) ? 1 : quantity;
 }
 
 /**
