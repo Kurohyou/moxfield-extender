@@ -99,10 +99,14 @@ function setupMutationObserver() {
 
   // Observe changes to the deck list container
   const observer = new MutationObserver((mutations) => {
-    // Check if relevant DOM changes occurred
-    const hasRelevantChanges = mutations.some((mutation) => {
-      return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
-    });
+    // Ignore mutations caused by our own rendering, or each render would
+    // schedule another refresh forever. Then check for relevant DOM changes.
+    const { isOwnMutation } = window.MoxfieldExtended.domHelpers;
+    const hasRelevantChanges = mutations
+      .filter((mutation) => !isOwnMutation(mutation))
+      .some((mutation) => {
+        return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+      });
 
     if (hasRelevantChanges && window.MoxfieldExtended.state.initialized) {
       // Debounce updates

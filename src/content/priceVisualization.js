@@ -23,28 +23,11 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   const TOGGLE_KEY = 'p'; // Alt+P toggles on/off, Alt+Shift+P switches mode
 
   /**
-   * Check if running in goldfish mode
-   * @returns {boolean} True if in goldfish mode
-   */
-  function isGoldfishMode() {
-    return window.location.pathname.endsWith('/goldfish');
-  }
-
-  /**
-   * Get the current deck ID from the URL
-   * @returns {string|null} Deck ID or null if not on a deck page
-   */
-  function getDeckId() {
-    const match = window.location.pathname.match(/\/decks\/([a-zA-Z0-9_-]+)/);
-    return match ? match[1] : null;
-  }
-
-  /**
    * Load budget goal for current deck from localStorage
    * @returns {number|null} Budget goal or null if not set
    */
   function loadBudgetGoal() {
-    const deckId = getDeckId();
+    const deckId = window.MoxfieldExtended.domHelpers.getDeckId();
     if (!deckId) return null;
 
     const stored = localStorage.getItem(`mox-budget-${deckId}`);
@@ -56,7 +39,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
    * @param {number|null} budget - Budget goal or null to clear
    */
   function saveBudgetGoal(budget) {
-    const deckId = getDeckId();
+    const deckId = window.MoxfieldExtended.domHelpers.getDeckId();
     if (!deckId) return;
 
     if (budget === null || budget === undefined) {
@@ -135,7 +118,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
         isDeckWideMode = state.deckWide || false;
 
         // Only apply if not in goldfish mode
-        if (!isGoldfishMode()) {
+        if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
           applyVisualization();
           showIndicator();
         } else {
@@ -191,7 +174,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     console.log(LOG_PREFIX, `Price visualization: ${isActive ? 'ON' : 'OFF'} (${isDeckWideMode ? 'deck-wide' : 'per-section'})`);
 
     if (isActive) {
-      if (!isGoldfishMode()) {
+      if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
         applyVisualization();
         showIndicator();
       } else {
@@ -224,7 +207,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
       isDeckWideMode = true;
       isActive = true;
-      if (!isGoldfishMode()) {
+      if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
         applyVisualization();
         showIndicator();
       }
@@ -238,7 +221,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     console.log(LOG_PREFIX, `Price visualization mode: ${isDeckWideMode ? 'deck-wide' : 'per-section'}`);
 
     // Re-apply with new mode
-    if (!isGoldfishMode()) {
+    if (!window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
       applyVisualization();
       showIndicator();
     }
@@ -255,7 +238,7 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
     // Re-apply visualization to catch new/updated cards
     // Re-apply visualization to catch new/updated cards
-    if (isGoldfishMode()) {
+    if (window.MoxfieldExtended.domHelpers.isGoldfishMode()) {
       removeVisualization();
       hideIndicator();
     } else {
