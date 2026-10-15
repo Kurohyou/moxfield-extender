@@ -115,6 +115,8 @@ Each test file gets a fresh module graph. Inside a file, use `vi.resetModules()`
 - `storage.onChanged.addListener`, firing `(changes, areaName)` after `set`.
 - `runtime.onMessage.addListener`.
 - `__reset()` for `beforeEach`.
+- **jsdom gaps.** Stub a no-op `ResizeObserver` (`headerCluster.init()` creates one and would throw without it). Check whether `requestAnimationFrame` exists in vitest's jsdom environment, and stub it with a synchronous call if not. The layout pass and the "zero DOM writes" test depend on it.
+- **jsdom widths are all 0.** `chooseHeaderLayout` returns `hidden` in render tests, so those tests assert that nodes exist and that writes are idempotent, never that anything is visible.
 
 **Fixtures**
 
@@ -233,7 +235,9 @@ evaluate({ N, K, turns, k }) → {
   - `count` is the `(n)` in the `span` after `span[title]`, falling back to the last `\((\d+)\)` in the link text.
   - Skip Sections whose title is in `SPECIAL_BOARD_TITLES`. The spec's known limitation about user tags with those names stays.
 - `readLibrary()` returns `{ ok: true, value }` or `{ ok: false, reason }` (spec §2.2):
-  - Find the footer by text, `/^\s*(\d+)\s+main deck\s*$/`, using a `TreeWalker` over text nodes containing `main deck`. Don't scan every `div` the way the prototype does.
+  - Find the footer by text, `/^\s*(\d+)\s+main deck\s*$/`. Use a `TreeWalker` over text nodes containing `main deck`; don't scan every `div` the way the prototype does.
+  - From each hit, walk up the ancestors until one's `textContent` matches the regex. Stop once the text is longer than about 40 characters. The count and "main deck" may sit in separate elements, so the text node's direct parent may never match.
+  - Settle the real structure from the footer fixture captured in Phase 1.
   - Cache the element while it's still `isConnected` and still matches.
   - Subtract the `(n)` of the Commander header, or 0 if there is no Commander Section.
 - `getGroupBy()` returns `document.querySelector('select#groupBy')?.value ?? 'type'` (spec §2.5).
@@ -275,7 +279,7 @@ evaluate({ N, K, turns, k }) → {
 }
 ```
 
-- **Why `local`, not `sync`.** `sync` has quota limits: 8 KB per item, 100 KB in total, 512 items, and 120 writes per minute. A held Alt+= or a fast stepper can blow the write rate, and many decks with overrides can exhaust the total. `local` has 10 MB and no write-rate limit. The trade-off is that per-deck settings don't follow the user to other machines. Global toggles still do.
+- **Why `local`, not `sync`.** `sync` has quota limits, roughly 8 KB per item, 100 KB in total, 512 items, and 120 writes per minute. Check the current values in the `chrome.storage` docs at implementation time. A held Alt+= or a fast stepper can blow the write rate, and many decks with overrides can exhaust the total. `local` has 10 MB and no write-rate limit. The trade-off is that per-deck settings don't follow the user to other machines. Global toggles still do.
 - **Nest the override keys. Never concatenate them.** Section names can contain any character.
 - **Orphaned overrides are kept** (spec §2.5): no cleanup pass.
 - **Budget goal stays in page `localStorage` (`mox-budget-${deckId}`).** It isn't migrated. The popover just reads and writes it through `priceVisualization`. Migrating it is a possible follow-up, not part of this plan.
@@ -353,6 +357,7 @@ Apply the result as `data-layout` on the cluster. CSS does the rest. The header 
 section.deckview article > ul > li:has(> .mox-cluster) { min-width: 0; }
 section.deckview article > ul > li:has(> .mox-cluster) > a.table-deck-row-link { min-width: 0; flex: 0 1 auto; }
 section.deckview article > ul > li:has(> .mox-cluster) > a.table-deck-row-link > span[title] { min-width: 0; }
+section.deckview article > ul > li:has(> .mox-cluster) > span.text-nowrap.fw-normal { flex: none; }
 .mox-cluster { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 6px; }
 .mox-cluster[data-layout="shared"][data-shows="odds"] .mox-curve,
 .mox-cluster[data-layout="shared"][data-shows="curve"] .mox-odds,
