@@ -1,6 +1,6 @@
 /**
  * Floating badge for Moxfield Extended (spec 5.1)
- * A fixed bottom-right pill with three segments: price bars, Section odds and
+ * A fixed top-right pill with three segments: price bars, Section odds and
  * Section mana curve. It shows while any of them is on, outside goldfish mode.
  * It also owns Alt+O and Alt+M (spec 5.5), which work even while their
  * feature is off, so it is initialised on every deck page.
@@ -27,8 +27,8 @@
   const CSS = `
 .mox-badge {
   position: fixed;
+  top: 20px;
   right: 20px;
-  bottom: 20px;
   z-index: 1990;
   display: flex;
   align-items: center;
