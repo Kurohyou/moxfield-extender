@@ -19,40 +19,89 @@ function choose(n, k) {
 }
 
 /**
- * Exact P(X >= k) as a rational, converted to a number only at the end.
- * @returns {number}
+ * Exact P(X >= k) as a BigInt numerator/denominator.
+ * @returns {{numerator: bigint, denominator: bigint}}
  */
-function oracle(N, K, turns, k) {
+function exact(N, K, turns, k) {
   const seen = Math.min(7 + turns, N);
   let numerator = 0n;
   for (let x = k; x <= Math.min(K, seen); x += 1) {
     numerator += choose(K, x) * choose(N - K, seen - x);
   }
-  const denominator = choose(N, seen);
+  return { numerator, denominator: choose(N, seen) };
+}
+
+/**
+ * Exact P(X >= k), converted to a number only at the end.
+ * @returns {number}
+ */
+function oracle(N, K, turns, k) {
+  const { numerator, denominator } = exact(N, K, turns, k);
   const scale = 10n ** 30n;
   return Number((numerator * scale) / denominator) / Number(scale);
 }
 
-describe('exact oracle', () => {
-  it('matches the BigInt hypergeometric tail over a grid', () => {
-    let checked = 0;
-    for (const N of [1, 2, 7, 8, 9, 10, 15, 30, 45, 60]) {
-      for (const K of [0, 1, 2, 5, 12, 30, 59, 60]) {
-        if (K > N) continue;
-        for (const turns of [0, 1, 3, 4, 10, 30, 60]) {
-          for (const k of [1, 2, 3, 5, 8]) {
-            const result = oddsMath.evaluate({ N, K, turns, k });
-            const expected = oracle(N, K, turns, k);
-            expect(
-              Math.abs(result.p - expected),
-              `N=${N} K=${K} T=${turns} k=${k}`
-            ).toBeLessThan(1e-12);
-            checked += 1;
-          }
+/**
+ * Expected chip label for an exact probability, per spec 2.4.
+ * @returns {string}
+ */
+function expectedLabel(N, K, turns, k) {
+  const { numerator, denominator } = exact(N, K, turns, k);
+  if (numerator === 0n) return '0%';
+  if (numerator === denominator) return '100%';
+  // Exact round-half-up of 100 * numerator / denominator.
+  const rounded = Number((200n * numerator + denominator) / (2n * denominator));
+  if (rounded >= 100) return '>99%';
+  if (rounded <= 0) return '<1%';
+  return `${rounded}%`;
+}
+
+/**
+ * Check evaluate against the BigInt oracle (p and label) over a grid.
+ * @returns {number} Combinations checked
+ */
+function checkGrid({ Ns, Ks, Ts, ks }) {
+  let checked = 0;
+  for (const N of Ns) {
+    for (const K of Ks) {
+      if (K > N) continue;
+      for (const turns of Ts) {
+        for (const k of ks) {
+          const result = oddsMath.evaluate({ N, K, turns, k });
+          const context = `N=${N} K=${K} T=${turns} k=${k}`;
+          expect(
+            Math.abs(result.p - oracle(N, K, turns, k)),
+            context
+          ).toBeLessThan(1e-12);
+          // Labels agree with Math.round semantics on the exact probability.
+          expect(result.label, context).toBe(expectedLabel(N, K, turns, k));
+          checked += 1;
         }
       }
     }
+  }
+  return checked;
+}
+
+describe('exact oracle', () => {
+  it('matches the BigInt hypergeometric tail over a small-Library grid', () => {
+    const checked = checkGrid({
+      Ns: [1, 2, 7, 8, 9, 10, 15, 30, 45, 60],
+      Ks: [0, 1, 2, 5, 12, 30, 59, 60],
+      Ts: [0, 1, 3, 4, 10, 30, 60],
+      ks: [1, 2, 3, 5, 8],
+    });
     expect(checked).toBeGreaterThan(500);
+  });
+
+  it('matches the BigInt hypergeometric tail for Commander-sized Libraries', () => {
+    const checked = checkGrid({
+      Ns: [99, 100, 200],
+      Ks: [1, 3, 10, 37, 60, 90, 93],
+      Ts: [0, 3, 10, 25],
+      ks: [1, 2, 4, 8],
+    });
+    expect(checked).toBeGreaterThan(200);
   });
 
   it('reports certain exactly 1 and impossible exactly 0', () => {
@@ -171,5 +220,65 @@ describe('libraryError', () => {
 
   it('accepts an empty Section list', () => {
     expect(oddsMath.libraryError(99, [])).toBeNull();
+  });
+});
+
+describe('label rounding boundaries', () => {
+  it('rounds an exact half up (7/8 = 87.5%)', () => {
+    expect(oddsMath.evaluate({ N: 8, K: 1, turns: 0, k: 1 }).label).toBe('88%');
+  });
+
+  const cases = [
+    // p just under 0.005 rounds to 0, so it shows <1%.
+    { N: 99, K: 5, turns: 2, k: 3, label: '<1%' },
+    // p just over 0.005 rounds to 1.
+    { N: 99, K: 4, turns: 5, k: 3, label: '1%' },
+    // p just under 0.995 rounds to 99.
+    { N: 99, K: 31, turns: 6, k: 1, label: '99%' },
+    // p just over 0.995 rounds to 100, but is not certain, so >99%.
+    { N: 99, K: 39, turns: 3, k: 1, label: '>99%' },
+  ];
+
+  cases.forEach(({ N, K, turns, k, label }) => {
+    it(`N=${N} K=${K} T=${turns} k=${k} -> ${label}`, () => {
+      const p = oracle(N, K, turns, k);
+      expect(Math.abs(p - 0.005) < 0.0006 || Math.abs(p - 0.995) < 0.0006).toBe(
+        true
+      );
+      const result = oddsMath.evaluate({ N, K, turns, k });
+      expect(result.kind).toBe('odds');
+      expect(result.label).toBe(label);
+      expect(result.tooltip.startsWith(label)).toBe(true);
+    });
+  });
+});
+
+describe('evaluate input validation', () => {
+  const valid = { N: 99, K: 10, turns: 3, k: 1 };
+  const invalid = {
+    'NaN turns': { turns: NaN },
+    'null k': { k: null },
+    'fractional K': { K: 10.5 },
+    'k of 0': { k: 0 },
+    'negative turns': { turns: -1 },
+    'N of 0': { N: 0 },
+    'negative K': { K: -1 },
+    'undefined N': { N: undefined },
+    'string turns': { turns: '3' },
+    'Infinity turns': { turns: Infinity },
+  };
+
+  Object.entries(invalid).forEach(([name, override]) => {
+    it(`throws a RangeError for ${name}`, () => {
+      expect(() => oddsMath.evaluate({ ...valid, ...override })).toThrow(
+        RangeError
+      );
+    });
+  });
+
+  it('accepts the boundary values', () => {
+    expect(() =>
+      oddsMath.evaluate({ N: 1, K: 0, turns: 0, k: 1 })
+    ).not.toThrow();
   });
 });

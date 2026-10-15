@@ -31,6 +31,7 @@
     if (/^\d+$/.test(sym)) return parseInt(sym, 10);
     if (/^[xyz]$/.test(sym)) return 0;
     if (/^2[wubrg]$/.test(sym)) return 2;
+    // Unrecognised symbols count as 1 by design (spec §3.3).
     return 1;
   }
 
@@ -86,6 +87,8 @@
     let weighted = 0;
 
     rows.forEach((row) => {
+      // Guard against the same card entry being passed twice (a duplicated or
+      // re-rendered row); data-hash identifies the entry, so count it once.
       const hash = row.getAttribute('data-hash');
       if (hash) {
         if (seenHashes.has(hash)) return;

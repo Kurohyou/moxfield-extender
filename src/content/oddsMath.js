@@ -42,25 +42,57 @@
    * @returns {string}
    */
   function formatOdds(p) {
-    const rounded = Math.round(p * 100);
+    // The epsilon keeps exact halves (e.g. 7/8 = 87.5%) rounding up despite
+    // floating-point error of about 1e-14 in p.
+    const rounded = Math.round(p * 100 + 1e-9);
     if (rounded >= 100) return '>99%';
     if (rounded <= 0) return '<1%';
     return `${rounded}%`;
   }
 
   /**
+   * Tooltip for an odds, certain or count-reachable-but-unseen result.
+   * @param {string} label - Chip label
+   * @param {number} k - Desired count
+   * @param {number} turns - By turn T
+   * @param {boolean} wholeLibrary - True when 7 + T covers the Library
+   * @returns {string}
+   */
+  function describe(label, k, turns, wholeLibrary) {
+    return wholeLibrary
+      ? `${label} ≥${k}, whole Library seen`
+      : `${label} ≥${k} by T${turns}`;
+  }
+
+  /**
    * Evaluate the odds of seeing at least `k` of a Section's cards.
    * Classification is combinatorial so 100% and 0% mean exactly certain and
    * impossible, never a rounding artefact of floating point.
+   *
+   * Callers must check `libraryError(N, sections) === null` first, so that
+   * K <= N holds; this function does not re-validate that relationship.
    * @param {Object} params
-   * @param {number} params.N - Library size (population)
-   * @param {number} params.K - Section count (successes)
-   * @param {number} params.turns - By turn T (0 is the opening hand)
-   * @param {number} params.k - Desired number of the Section's cards (>= 1)
+   * @param {number} params.N - Library size (population), integer >= 1
+   * @param {number} params.K - Section count (successes), integer >= 0
+   * @param {number} params.turns - By turn T (0 is the opening hand), integer >= 0
+   * @param {number} params.k - Desired number of the Section's cards, integer >= 1
    * @returns {{kind: 'certain'|'impossible'|'odds', p: number, seen: number,
    *   wholeLibrary: boolean, label: string, tooltip: string}}
+   * @throws {RangeError} When any input is not an integer in range
    */
   function evaluate({ N, K, turns, k }) {
+    const valid =
+      [N, K, turns, k].every(Number.isInteger) &&
+      N >= 1 &&
+      K >= 0 &&
+      turns >= 0 &&
+      k >= 1;
+    if (!valid) {
+      throw new RangeError(
+        `oddsMath.evaluate needs integers N >= 1, K >= 0, turns >= 0, k >= 1; got ${JSON.stringify({ N, K, turns, k })}`
+      );
+    }
+
     const seen = Math.min(OPENING_HAND + turns, N);
     const wholeLibrary = OPENING_HAND + turns >= N;
     const base = { seen, wholeLibrary };
@@ -70,15 +102,13 @@
       const tooltip =
         k > K
           ? `Only ${K} ${K === 1 ? 'card' : 'cards'} in Section; need ≥${k}`
-          : `${label} ≥${k} by T${turns}`;
+          : describe(label, k, turns, wholeLibrary);
       return { kind: 'impossible', p: 0, label, tooltip, ...base };
     }
 
     if (k <= seen - (N - K)) {
       const label = '100%';
-      const tooltip = wholeLibrary
-        ? `${label} ≥${k}, whole Library seen`
-        : `${label} ≥${k} by T${turns}`;
+      const tooltip = describe(label, k, turns, wholeLibrary);
       return { kind: 'certain', p: 1, label, tooltip, ...base };
     }
 
@@ -90,9 +120,7 @@
     p = Math.min(1, Math.max(0, p));
 
     const label = formatOdds(p);
-    const tooltip = wholeLibrary
-      ? `${label} ≥${k}, whole Library seen`
-      : `${label} ≥${k} by T${turns}`;
+    const tooltip = describe(label, k, turns, wholeLibrary);
     return { kind: 'odds', p, label, tooltip, ...base };
   }
 
