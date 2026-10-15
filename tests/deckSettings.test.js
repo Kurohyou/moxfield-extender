@@ -138,7 +138,11 @@ describe('defaults', () => {
     });
     await ds.ensureLoaded('a');
     const type = ds.get().overrides.type;
-    expect(Object.keys(type).sort()).toEqual(['BadDesired', 'Both', 'TurnsOnly']);
+    expect(Object.keys(type).sort()).toEqual([
+      'BadDesired',
+      'Both',
+      'TurnsOnly',
+    ]);
     expect({ ...type.Both }).toEqual({ desired: 3, turns: 0 });
     expect({ ...type.TurnsOnly }).toEqual({ turns: 5 });
     expect({ ...type.BadDesired }).toEqual({ turns: 4 });

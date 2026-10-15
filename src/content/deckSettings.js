@@ -368,7 +368,9 @@
    */
   function fieldFor(field, groupBy, name) {
     const entry = entryFor(groupBy, name);
-    return entry && Object.hasOwn(entry, field) ? entry[field] : settings[field];
+    return entry && Object.hasOwn(entry, field)
+      ? entry[field]
+      : settings[field];
   }
 
   /**

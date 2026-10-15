@@ -64,11 +64,19 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.mox-stepper__row button:disabled {
+.mox-stepper__row button:disabled,
+.mox-stepper__row button[aria-disabled='true'] {
   opacity: 0.4;
   cursor: default;
 }
-.mox-stepper__value {
+.mox-stepper__row + .mox-stepper__row {
+  margin-top: 4px;
+}
+.mox-stepper__name {
+  min-width: 4.5em;
+}
+.mox-stepper__value,
+.mox-stepper__turns-value {
   min-width: 2ch;
   text-align: center;
   font-weight: 600;
@@ -151,7 +159,7 @@
       const { label, tooltip } = ns().oddsMath.evaluate({
         N: library.value,
         K: section.count,
-        turns: deckSettings.get().turns,
+        turns: deckSettings.turnsFor(groupBy, section.name),
         k: deckSettings.desiredFor(groupBy, section.name),
       });
       return { label, tooltip };
@@ -247,19 +255,28 @@
       <div class="mox-stepper__title"></div>
       <div class="mox-stepper__odds"></div>
       <div class="mox-stepper__row">
-        <span>At least</span>
+        <span class="mox-stepper__name">At least</span>
         <button type="button" class="mox-stepper__dec">−</button>
         <span class="mox-stepper__value"></span>
         <button type="button" class="mox-stepper__inc">+</button>
       </div>
+      <div class="mox-stepper__row">
+        <span class="mox-stepper__name">By turn</span>
+        <button type="button" class="mox-stepper__turns-dec">−</button>
+        <span class="mox-stepper__turns-value"></span>
+        <button type="button" class="mox-stepper__turns-inc">+</button>
+      </div>
       <button type="button" class="mox-stepper__reset" hidden></button>`;
     // Set through the DOM, not markup, so a Section name is never parsed as HTML.
-    root
-      .querySelector('.mox-stepper__dec')
-      .setAttribute('aria-label', `Decrease at-least count for ${name}`);
-    root
-      .querySelector('.mox-stepper__inc')
-      .setAttribute('aria-label', `Increase at-least count for ${name}`);
+    const labels = [
+      ['.mox-stepper__dec', `Decrease at-least count for ${name}`],
+      ['.mox-stepper__inc', `Increase at-least count for ${name}`],
+      ['.mox-stepper__turns-dec', `Decrease turn for ${name}`],
+      ['.mox-stepper__turns-inc', `Increase turn for ${name}`],
+    ];
+    labels.forEach(([selector, label]) =>
+      root.querySelector(selector).setAttribute('aria-label', label)
+    );
 
     /**
      * Step the Section's desired count, read fresh at click time.
@@ -273,16 +290,38 @@
       deckSettings.setOverride(groupBy, name, next);
     }
 
+    /**
+     * Step the Section's By turn, read fresh at click time. A button at its
+     * limit is aria-disabled rather than disabled, so it keeps focus; its
+     * clicks are ignored here.
+     * @param {HTMLButtonElement} button
+     * @param {number} delta
+     */
+    function stepTurns(button, delta) {
+      if (button.getAttribute('aria-disabled') === 'true') return;
+      if (!pageDeckLoaded()) return;
+      const { domHelpers, deckSettings } = ns();
+      const groupBy = domHelpers.getGroupBy();
+      const next = Math.max(0, deckSettings.turnsFor(groupBy, name) + delta);
+      deckSettings.setTurnsOverride(groupBy, name, next);
+    }
+
     root
       .querySelector('.mox-stepper__dec')
       .addEventListener('click', () => step(-1));
     root
       .querySelector('.mox-stepper__inc')
       .addEventListener('click', () => step(1));
+    root
+      .querySelector('.mox-stepper__turns-dec')
+      .addEventListener('click', (event) => stepTurns(event.currentTarget, -1));
+    root
+      .querySelector('.mox-stepper__turns-inc')
+      .addEventListener('click', (event) => stepTurns(event.currentTarget, 1));
     root.querySelector('.mox-stepper__reset').addEventListener('click', () => {
       if (!pageDeckLoaded()) return;
       const { domHelpers, deckSettings } = ns();
-      deckSettings.setOverride(domHelpers.getGroupBy(), name, null);
+      deckSettings.resetOverride(domHelpers.getGroupBy(), name);
     });
     // Keep stepper clicks away from Moxfield's handlers.
     container.addEventListener('click', (event) => event.stopPropagation());
@@ -319,7 +358,13 @@
       deckSettings
     );
     const desired = deckSettings.desiredFor(groupBy, name);
+    const turns = deckSettings.turnsFor(groupBy, name);
     const overridden = deckSettings.isOverridden(groupBy, name);
+    const defaults = deckSettings.get();
+    // Cards seen by turn T: the opening hand plus T (spec 2.5).
+    const seen = oddsMath.OPENING_HAND + turns;
+    // No maximum when the Library is unreadable; a stored T above it shows as-is.
+    const atMax = library.ok && seen >= library.value;
     const { count } = section;
     const cards =
       count == null
@@ -339,9 +384,30 @@
     const dec = root.querySelector('.mox-stepper__dec');
     if (dec.disabled !== desired <= 1) dec.disabled = desired <= 1;
 
+    setText(
+      root.querySelector('.mox-stepper__turns-value'),
+      `T${turns} · ${seen} cards seen`
+    );
+    setInert(root.querySelector('.mox-stepper__turns-dec'), turns <= 0);
+    setInert(root.querySelector('.mox-stepper__turns-inc'), atMax);
+
     const reset = root.querySelector('.mox-stepper__reset');
-    setText(reset, `Reset to default (${deckSettings.get().desired})`);
+    setText(
+      reset,
+      `Reset to deck defaults (T${defaults.turns}, ≥${defaults.desired})`
+    );
     if (reset.hidden !== !overridden) reset.hidden = !overridden;
+  }
+
+  /**
+   * Mark a stepper button as at its limit (or not), only when it differs.
+   * @param {HTMLButtonElement} button
+   * @param {boolean} inert
+   */
+  function setInert(button, inert) {
+    if ((button.getAttribute('aria-disabled') === 'true') === inert) return;
+    if (inert) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
   }
 
   /**

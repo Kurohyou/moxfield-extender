@@ -195,6 +195,33 @@ describe('view', () => {
     expect(chip.title).toBe(expected.tooltip);
   });
 
+  it('uses the Section turns override over the deck turns', () => {
+    deckSettings.setTurns(4);
+    deckSettings.setTurnsOverride('type', 'Creatures', 5);
+    deckSettings.setOverride('type', 'Creatures', 2);
+    const chip = sectionOdds.view(section('Creatures'), ctxFor(), null);
+    const expected = oddsMath.evaluate({ N: 99, K: 30, turns: 5, k: 2 });
+    expect(chip.textContent).toBe(expected.label);
+    expect(chip.title).toBe(expected.tooltip);
+    expect(chip.title).toMatch(/≥2 by T5$/);
+
+    const lands = sectionOdds.view(section('Lands'), ctxFor(), null);
+    expect(lands.title).toBe(
+      oddsMath.evaluate({ N: 99, K: 20, turns: 4, k: 1 }).tooltip
+    );
+  });
+
+  it('underlines a turns-only override', () => {
+    const chip = sectionOdds.view(section('Creatures'), ctxFor(), null);
+    deckSettings.setTurnsOverride('type', 'Creatures', 5);
+    sectionOdds.view(section('Creatures'), ctxFor(), chip);
+    expect(chip.classList.contains('mox-odds--override')).toBe(true);
+
+    deckSettings.resetOverride('type', 'Creatures');
+    sectionOdds.view(section('Creatures'), ctxFor(), chip);
+    expect(chip.classList.contains('mox-odds--override')).toBe(false);
+  });
+
   it('shows ? with the reason when the footer is missing', () => {
     build({ footerCount: null });
     const chip = sectionOdds.view(section('Creatures'), ctxFor(), null);
@@ -391,6 +418,17 @@ describe('Alt+= / Alt+−', () => {
     expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
   });
 
+  it('steps only desired, keeping a turns override', () => {
+    deckSettings.setTurnsOverride('type', 'Creatures', 5);
+    hover(section('Creatures').rows[0]);
+    key(document.body, ALT_PLUS);
+    expect(deckSettings.desiredFor('type', 'Creatures')).toBe(2);
+    expect(deckSettings.turnsFor('type', 'Creatures')).toBe(5);
+    key(document.body, ALT_MINUS);
+    expect(deckSettings.isDesiredOverridden('type', 'Creatures')).toBe(false);
+    expect(deckSettings.turnsFor('type', 'Creatures')).toBe(5);
+  });
+
   it('init() is idempotent: one keypress steps once', () => {
     sectionOdds.init();
     hover(section('Creatures').rows[0]);
@@ -575,11 +613,129 @@ describe('stepper', () => {
 
     inc().click();
     expect(reset().hidden).toBe(false);
-    expect(reset().textContent).toBe('Reset to default (1)');
+    expect(reset().textContent).toBe('Reset to deck defaults (T3, ≥1)');
 
     reset().click();
     expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
     expect(reset().hidden).toBe(true);
+  });
+
+  describe('turn row', () => {
+    const turnDec = () => stepper().querySelector('.mox-stepper__turns-dec');
+    const turnInc = () => stepper().querySelector('.mox-stepper__turns-inc');
+    const turnValue = () =>
+      stepper().querySelector('.mox-stepper__turns-value').textContent;
+    const inert = (button) => button.getAttribute('aria-disabled') === 'true';
+
+    it('labels its buttons with the Section name', () => {
+      openCreatures();
+      expect(turnDec().getAttribute('aria-label')).toBe(
+        'Decrease turn for Creatures'
+      );
+      expect(turnInc().getAttribute('aria-label')).toBe(
+        'Increase turn for Creatures'
+      );
+      expect(stepper().textContent).toContain('By turn');
+      expect(stepper().textContent).toContain('At least');
+    });
+
+    it('shows the Section turn and the cards seen', () => {
+      openCreatures();
+      expect(turnValue()).toBe('T3 · 10 cards seen');
+      deckSettings.setTurnsOverride('type', 'Creatures', 5);
+      expect(turnValue()).toBe('T5 · 12 cards seen');
+    });
+
+    it('+ and − set the turns override, and the full form follows', () => {
+      openCreatures();
+      turnInc().click();
+      turnInc().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(5);
+      expect(deckSettings.get().turns).toBe(3);
+      const expected = oddsMath.evaluate({ N: 99, K: 30, turns: 5, k: 1 });
+      expect(stepper().textContent).toContain(expected.tooltip);
+
+      turnDec().click();
+      turnDec().click();
+      expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
+      expect(deckSettings.get().overrides.type).toBeUndefined();
+    });
+
+    it('− is inert at T0 and its clicks are ignored', () => {
+      deckSettings.setTurnsOverride('type', 'Creatures', 1);
+      openCreatures();
+      expect(inert(turnDec())).toBe(false);
+      turnDec().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(0);
+      expect(inert(turnDec())).toBe(true);
+      expect(turnDec().disabled).toBe(false); // keeps focus
+      turnDec().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(0);
+    });
+
+    it('+ is inert once 7 + T reaches the Library, and its clicks are ignored', () => {
+      deckSettings.setTurnsOverride('type', 'Creatures', 91); // 98 seen of 99
+      openCreatures();
+      expect(inert(turnInc())).toBe(false);
+      turnInc().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(92);
+      expect(turnValue()).toBe('T92 · 99 cards seen');
+      expect(inert(turnInc())).toBe(true);
+      turnInc().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(92);
+    });
+
+    it('shows a stored T above the maximum as-is', () => {
+      deckSettings.setTurnsOverride('type', 'Creatures', 200);
+      openCreatures();
+      expect(turnValue()).toBe('T200 · 207 cards seen');
+      expect(inert(turnInc())).toBe(true);
+      expect(inert(turnDec())).toBe(false);
+    });
+
+    it('has no maximum when the Library is unreadable', () => {
+      deck.footer.remove();
+      deckSettings.setTurnsOverride('type', 'Creatures', 92);
+      openCreatures();
+      expect(inert(turnInc())).toBe(false);
+      turnInc().click();
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(93);
+    });
+
+    it('shows Reset for a turns-only override; Reset clears both and hides', () => {
+      openCreatures();
+      turnInc().click();
+      expect(reset().hidden).toBe(false);
+      inc().click();
+      expect(deckSettings.desiredFor('type', 'Creatures')).toBe(2);
+
+      reset().click();
+      expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
+      expect(deckSettings.turnsFor('type', 'Creatures')).toBe(3);
+      expect(deckSettings.desiredFor('type', 'Creatures')).toBe(1);
+      expect(reset().hidden).toBe(true);
+      expect(turnValue()).toBe('T3 · 10 cards seen');
+    });
+
+    it('names the current deck defaults in Reset', () => {
+      deckSettings.setTurns(4);
+      deckSettings.setDesired(2);
+      deckSettings.setTurnsOverride('type', 'Creatures', 6);
+      openCreatures();
+      expect(reset().textContent).toBe('Reset to deck defaults (T4, ≥2)');
+    });
+  });
+
+  it('makes zero DOM writes on a redraw with nothing changed', async () => {
+    deckSettings.setOverride('type', 'Creatures', 2);
+    deckSettings.setTurnsOverride('type', 'Creatures', 0);
+    openCreatures();
+    const root = stepper().querySelector('.mox-stepper');
+    const records = await recordMutations(root, () => {
+      sectionOdds.refreshStepper();
+      sectionOdds.refreshStepper();
+    });
+    expect(records).toEqual([]);
   });
 
   it('stops clicks inside it from propagating', () => {

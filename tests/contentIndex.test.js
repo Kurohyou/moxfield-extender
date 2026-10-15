@@ -642,6 +642,38 @@ describe('content index Section odds wiring', () => {
     expect(await storedOverrides('xyz')).toBeUndefined();
   });
 
+  it.each(['.mox-stepper__turns-inc', '.mox-stepper__reset'])(
+    'does not write %s into the previous deck after a deck change',
+    async (selector) => {
+      await loadContent({ deck: true });
+      await vi.waitFor(() =>
+        expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+      );
+      await settle();
+      const { deckSettings, sectionOdds } = window.MoxfieldExtended;
+      // Reset is only shown while overridden, so give it something to clear.
+      deckSettings.setTurnsOverride('type', 'Creatures', 5);
+      await deckSettings.flush();
+      sectionOdds.openStepper(
+        header('Creatures').querySelector('.mox-odds'),
+        'Creatures'
+      );
+      const button = document.querySelector(selector);
+      expect(button).not.toBeNull();
+
+      window.history.pushState({}, '', '/decks/xyz');
+      button.click();
+      await settle();
+      await deckSettings.flush();
+
+      expect(deckSettings.isLoadedFor('xyz')).toBe(true);
+      expect(await storedOverrides('abc')).toEqual({
+        type: { Creatures: { turns: 5 } },
+      });
+      expect(await storedOverrides('xyz')).toBeUndefined();
+    }
+  );
+
   it('still writes Alt+= into the current deck', async () => {
     await loadContent({ deck: true });
     await vi.waitFor(() =>
