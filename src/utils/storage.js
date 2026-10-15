@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   sectionShortcutsEnabled: true,
   priceVisualizationEnabled: true,
   multiSelectEnabled: true,
+  sectionOddsEnabled: true,
+  sectionCurveEnabled: true,
   priceVisualizationActive: false, // Current toggle state (not a feature toggle)
   colorScheme: 'blue-red',
 };
@@ -27,11 +29,16 @@ async function loadSettings() {
 /**
  * Save settings to chrome.storage.sync
  * @param {Object} settings - Settings to save (partial or full)
- * @returns {Promise<void>}
+ * @returns {Promise<void>} Rejects when chrome reports an error (e.g. the sync
+ *   write quota), so callers can roll back
  */
 async function saveSettings(settings) {
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(settings, resolve);
+  return new Promise((resolve, reject) => {
+    chrome.storage.sync.set(settings, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
   });
 }
 

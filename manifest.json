@@ -34,8 +34,17 @@
         "src/utils/storage.js",
         "src/utils/messaging.js",
         "src/content/domHelpers.js",
+        "src/content/deckSettings.js",
+        "src/content/oddsMath.js",
+        "src/content/manaValue.js",
+        "src/content/popover.js",
+        "src/content/sectionOdds.js",
+        "src/content/sectionCurve.js",
+        "src/content/headerCluster.js",
         "src/content/sectionShortcuts.js",
         "src/content/priceVisualization.js",
+        "src/content/settingsPopover.js",
+        "src/content/badge.js",
         "src/content/index.js"
       ],
       "run_at": "document_idle"

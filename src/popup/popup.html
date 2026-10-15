@@ -43,13 +43,35 @@
           <input type="checkbox" id="multiSelectEnabled" checked>
           <span class="toggle-slider"></span>
         </label>
+
+        <label class="toggle-setting">
+          <span class="setting-label">
+            <strong>Section Odds</strong>
+            <small>% chance per Section by turn</small>
+          </span>
+          <input type="checkbox" id="sectionOddsEnabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+
+        <label class="toggle-setting">
+          <span class="setting-label">
+            <strong>Mana Curve</strong>
+            <small>Per-Section mana value bars</small>
+          </span>
+          <input type="checkbox" id="sectionCurveEnabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
       </div>
-      
+
       <div class="shortcut-info">
         <h2>Shortcuts</h2>
         <ul>
-          <li><kbd>Alt+1-4</kbd> Move cards between boards</li>
-          <li><kbd>Ctrl+Shift+P</kbd> Toggle price bars</li>
+          <li><kbd>Alt+2-4</kbd> Hovered Section: remove, sideboard, considering</li>
+          <li><kbd>Alt+P</kbd> Toggle price bars</li>
+          <li><kbd>Alt+Shift+P</kbd> Switch price mode</li>
+          <li><kbd>Alt+O</kbd> Toggle Section odds</li>
+          <li><kbd>Alt+M</kbd> Toggle mana curve</li>
+          <li><kbd>Alt+= / Alt+&minus;</kbd> Raise or lower a hovered Section's odds target</li>
           <li><kbd>Escape</kbd> Clear selection</li>
         </ul>
       </div>

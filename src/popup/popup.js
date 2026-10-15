@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   sectionShortcutsEnabled: true,
   priceVisualizationEnabled: true,
   multiSelectEnabled: true,
+  sectionOddsEnabled: true,
+  sectionCurveEnabled: true,
   priceVisualizationActive: false,
   colorScheme: 'blue-red',
 };
@@ -17,6 +19,8 @@ const SETTING_IDS = [
   'sectionShortcutsEnabled',
   'priceVisualizationEnabled',
   'multiSelectEnabled',
+  'sectionOddsEnabled',
+  'sectionCurveEnabled',
 ];
 
 // Initialize popup

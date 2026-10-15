@@ -280,6 +280,7 @@ evaluate({ N, K, turns, k }) → {
 ```
 
 - **Why `local`, not `sync`.** `sync` has quota limits, roughly 8 KB per item, 100 KB in total, 512 items, and 120 writes per minute. Check the current values in the `chrome.storage` docs at implementation time. A held Alt+= or a fast stepper can blow the write rate, and many decks with overrides can exhaust the total. `local` has 10 MB and no write-rate limit. The trade-off is that per-deck settings don't follow the user to other machines. Global toggles still do.
+- **Shape changed after this plan.** Each override is now an entry `{ desired?, turns? }`, e.g. `type: { Creatures: { desired: 3, turns: 5 } }`, so a Section can also override By turn (spec §2.5). A stored plain number still loads as `{ desired }`. `deckSettings` adds `turnsFor`, `setTurnsOverride` and `resetOverride`.
 - **Nest the override keys. Never concatenate them.** Section names can contain any character.
 - **Orphaned overrides are kept** (spec §2.5): no cleanup pass.
 - **Budget goal stays in page `localStorage` (`mox-budget-${deckId}`).** It isn't migrated. The popover just reads and writes it through `priceVisualization`. Migrating it is a possible follow-up, not part of this plan.
