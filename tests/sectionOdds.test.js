@@ -567,6 +567,34 @@ describe('stepper', () => {
     expect(popover.isOpen()).toBe(false);
   });
 
+  it('refreshStepper() re-reads the DOM after a deck edit', () => {
+    openCreatures();
+    const s = section('Creatures');
+    s.rows[1].firstElementChild.firstElementChild.textContent = '15';
+    s.link.querySelector('span[title]').nextElementSibling.textContent = '(35)';
+
+    sectionOdds.refreshStepper();
+
+    const expected = oddsMath.evaluate({ N: 99, K: 35, turns: 3, k: 1 });
+    expect(stepper().textContent).toContain('Creatures · 35 cards');
+    expect(stepper().textContent).toContain(expected.tooltip);
+  });
+
+  it('refreshStepper() closes the stepper when its Section is gone', () => {
+    openCreatures();
+    section('Creatures').ul.remove();
+    sectionOdds.refreshStepper();
+    expect(popover.isOpen()).toBe(false);
+  });
+
+  it('refreshStepper() is a no-op with no stepper open', () => {
+    popover.open(document.body, (container) => {
+      container.textContent = 'other';
+    });
+    expect(() => sectionOdds.refreshStepper()).not.toThrow();
+    expect(document.querySelector('.mox-popover').textContent).toBe('other');
+  });
+
   it('cleanup() closes the stepper', () => {
     openCreatures();
     sectionOdds.cleanup();

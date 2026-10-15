@@ -349,6 +349,15 @@
   }
 
   /**
+   * Redraw our open stepper from the DOM, so its count and odds stay live
+   * after deck edits (spec 2.2). Closes it when its Section is gone; a no-op
+   * when no stepper is open. Called from the header refresh.
+   */
+  function refreshStepper() {
+    if (stepperHandle) stepperHandle.update();
+  }
+
+  /**
    * Right-click on a chip, or on a shared slot showing the curve, opens the
    * stepper instead of the browser menu.
    * @param {MouseEvent} event
@@ -464,5 +473,6 @@
     init,
     cleanup,
     openStepper,
+    refreshStepper,
   };
 })();

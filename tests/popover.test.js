@@ -25,6 +25,119 @@ beforeEach(async () => {
 
 afterEach(() => {
   popover.close();
+  vi.restoreAllMocks();
+});
+
+describe('positioning', () => {
+  const VIEWPORT = { innerWidth: 1000, innerHeight: 800 };
+  let saved;
+
+  /**
+   * Fake the layout jsdom lacks: the viewport, the popover's size and the
+   * anchor's rect.
+   * @param {{width: number, height: number}} size - Popover size
+   * @param {{top: number, bottom: number, left: number, right: number}} rect
+   */
+  function layout(size, rect) {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(
+      size.width
+    );
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(
+      size.height
+    );
+    vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
+      ...rect,
+      width: rect.right - rect.left,
+      height: rect.bottom - rect.top,
+      x: rect.left,
+      y: rect.top,
+    });
+  }
+
+  /**
+   * Open a popover and return its placement.
+   * @returns {{left: string, top: string}}
+   */
+  function place() {
+    const { el } = popover.open(anchor, () => {});
+    return { left: el.style.left, top: el.style.top };
+  }
+
+  beforeEach(() => {
+    saved = {};
+    Object.entries(VIEWPORT).forEach(([key, value]) => {
+      saved[key] = Object.getOwnPropertyDescriptor(window, key);
+      Object.defineProperty(window, key, { value, configurable: true });
+    });
+  });
+
+  afterEach(() => {
+    Object.entries(saved).forEach(([key, descriptor]) => {
+      if (descriptor) Object.defineProperty(window, key, descriptor);
+      else delete window[key];
+    });
+  });
+
+  it('sits below the anchor, right-aligned to it', () => {
+    layout(
+      { width: 200, height: 100 },
+      { top: 100, bottom: 120, left: 500, right: 600 }
+    );
+    expect(place()).toEqual({ left: '400px', top: '124px' });
+  });
+
+  it('clamps to the right edge with an 8 px margin', () => {
+    layout(
+      { width: 200, height: 100 },
+      { top: 100, bottom: 120, left: 900, right: 1100 }
+    );
+    expect(place()).toEqual({ left: '792px', top: '124px' });
+  });
+
+  it('clamps to the left edge with an 8 px margin', () => {
+    layout(
+      { width: 200, height: 100 },
+      { top: 100, bottom: 120, left: 0, right: 150 }
+    );
+    expect(place()).toEqual({ left: '8px', top: '124px' });
+  });
+
+  it('flips above the anchor when there is no room below', () => {
+    layout(
+      { width: 200, height: 100 },
+      { top: 730, bottom: 750, left: 500, right: 600 }
+    );
+    expect(place()).toEqual({ left: '400px', top: '626px' });
+  });
+
+  it('pins a popover taller than the viewport to the top margin', () => {
+    layout(
+      { width: 200, height: 900 },
+      { top: 100, bottom: 120, left: 500, right: 600 }
+    );
+    expect(place()).toEqual({ left: '400px', top: '8px' });
+  });
+
+  it('re-positions on update()', () => {
+    layout(
+      { width: 200, height: 100 },
+      { top: 100, bottom: 120, left: 500, right: 600 }
+    );
+    const handle = popover.open(anchor, () => {});
+    anchor.getBoundingClientRect.mockReturnValue({
+      top: 200,
+      bottom: 220,
+      left: 300,
+      right: 400,
+      width: 100,
+      height: 20,
+      x: 300,
+      y: 200,
+    });
+    handle.update();
+    expect(handle.el.style.left).toBe('200px');
+    expect(handle.el.style.top).toBe('224px');
+  });
 });
 
 describe('popover.open', () => {
