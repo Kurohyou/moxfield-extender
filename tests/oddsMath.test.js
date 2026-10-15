@@ -1,0 +1,175 @@
+import { describe, expect, it } from 'vitest';
+import '../src/content/oddsMath.js';
+
+const { oddsMath } = window.MoxfieldExtended;
+
+/**
+ * Exact binomial coefficient as a BigInt.
+ * @param {number} n
+ * @param {number} k
+ * @returns {bigint}
+ */
+function choose(n, k) {
+  if (k < 0 || k > n) return 0n;
+  let result = 1n;
+  for (let i = 1; i <= Math.min(k, n - k); i += 1) {
+    result = (result * BigInt(n - i + 1)) / BigInt(i);
+  }
+  return result;
+}
+
+/**
+ * Exact P(X >= k) as a rational, converted to a number only at the end.
+ * @returns {number}
+ */
+function oracle(N, K, turns, k) {
+  const seen = Math.min(7 + turns, N);
+  let numerator = 0n;
+  for (let x = k; x <= Math.min(K, seen); x += 1) {
+    numerator += choose(K, x) * choose(N - K, seen - x);
+  }
+  const denominator = choose(N, seen);
+  const scale = 10n ** 30n;
+  return Number((numerator * scale) / denominator) / Number(scale);
+}
+
+describe('exact oracle', () => {
+  it('matches the BigInt hypergeometric tail over a grid', () => {
+    let checked = 0;
+    for (const N of [1, 2, 7, 8, 9, 10, 15, 30, 45, 60]) {
+      for (const K of [0, 1, 2, 5, 12, 30, 59, 60]) {
+        if (K > N) continue;
+        for (const turns of [0, 1, 3, 4, 10, 30, 60]) {
+          for (const k of [1, 2, 3, 5, 8]) {
+            const result = oddsMath.evaluate({ N, K, turns, k });
+            const expected = oracle(N, K, turns, k);
+            expect(
+              Math.abs(result.p - expected),
+              `N=${N} K=${K} T=${turns} k=${k}`
+            ).toBeLessThan(1e-12);
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(500);
+  });
+
+  it('reports certain exactly 1 and impossible exactly 0', () => {
+    expect(oddsMath.evaluate({ N: 99, K: 93, turns: 3, k: 4 }).p).toBe(1);
+    expect(oddsMath.evaluate({ N: 99, K: 3, turns: 3, k: 4 }).p).toBe(0);
+  });
+});
+
+describe('reference values', () => {
+  const cases = [
+    { N: 99, K: 10, turns: 3, k: 1, p: 0.6736, label: '67%', kind: 'odds' },
+    { N: 99, K: 37, turns: 0, k: 3, p: 0.52468, label: '52%', kind: 'odds' },
+    { N: 99, K: 1, turns: 3, k: 1, p: 0.10101, label: '10%', kind: 'odds' },
+    { N: 99, K: 60, turns: 3, k: 1, p: 0.99996, label: '>99%', kind: 'odds' },
+    {
+      N: 99,
+      K: 90,
+      turns: 3,
+      k: 2,
+      p: 0.999999999994,
+      label: '>99%',
+      kind: 'odds',
+    },
+    { N: 99, K: 93, turns: 3, k: 4, p: 1, label: '100%', kind: 'certain' },
+    { N: 99, K: 2, turns: 0, k: 2, p: 0.00433, label: '<1%', kind: 'odds' },
+    { N: 99, K: 2, turns: 3, k: 2, p: 0.00928, label: '1%', kind: 'odds' },
+    { N: 99, K: 3, turns: 3, k: 4, p: 0, label: '0%', kind: 'impossible' },
+    { N: 9, K: 4, turns: 3, k: 2, p: 1, label: '100%', kind: 'certain' },
+    { N: 9, K: 1, turns: 3, k: 2, p: 0, label: '0%', kind: 'impossible' },
+  ];
+
+  cases.forEach(({ N, K, turns, k, p, label, kind }) => {
+    it(`N=${N} K=${K} T=${turns} k=${k} -> ${label}`, () => {
+      const result = oddsMath.evaluate({ N, K, turns, k });
+      expect(result.kind).toBe(kind);
+      expect(result.label).toBe(label);
+      // The table's p values are rounded to the precision they are written in.
+      const digits = String(p).split('.')[1]?.length ?? 0;
+      const tolerance = 0.5 * 10 ** -digits + 1e-15;
+      expect(Math.abs(result.p - p)).toBeLessThan(tolerance);
+      // The BigInt oracle agrees with the table.
+      expect(Math.abs(oracle(N, K, turns, k) - p)).toBeLessThan(tolerance);
+    });
+  });
+});
+
+describe('evaluate fields and tooltips', () => {
+  it('uses the normal tooltip form', () => {
+    const result = oddsMath.evaluate({ N: 99, K: 10, turns: 4, k: 2 });
+    expect(result.seen).toBe(11);
+    expect(result.wholeLibrary).toBe(false);
+    expect(result.tooltip).toBe(`${result.label} ≥2 by T4`);
+  });
+
+  it('reports whole Library seen when certain', () => {
+    const result = oddsMath.evaluate({ N: 9, K: 4, turns: 3, k: 2 });
+    expect(result.seen).toBe(9);
+    expect(result.wholeLibrary).toBe(true);
+    expect(result.tooltip).toBe('100% ≥2, whole Library seen');
+  });
+
+  it('caps seen at the Library size', () => {
+    expect(oddsMath.evaluate({ N: 20, K: 5, turns: 30, k: 1 }).seen).toBe(20);
+  });
+
+  it('gives the count reason with plural cards', () => {
+    expect(oddsMath.evaluate({ N: 99, K: 3, turns: 3, k: 4 }).tooltip).toBe(
+      'Only 3 cards in Section; need ≥4'
+    );
+  });
+
+  it('gives the count reason with singular card, beating whole Library seen', () => {
+    const result = oddsMath.evaluate({ N: 9, K: 1, turns: 3, k: 2 });
+    expect(result.wholeLibrary).toBe(true);
+    expect(result.tooltip).toBe('Only 1 card in Section; need ≥2');
+  });
+
+  it('uses the normal tooltip when K >= k but k exceeds the cards seen', () => {
+    const result = oddsMath.evaluate({ N: 99, K: 20, turns: 0, k: 8 });
+    expect(result.kind).toBe('impossible');
+    expect(result.label).toBe('0%');
+    expect(result.tooltip).toBe('0% ≥8 by T0');
+  });
+
+  it('is certain when the whole Library is seen and K >= k', () => {
+    const result = oddsMath.evaluate({ N: 9, K: 9, turns: 3, k: 9 });
+    expect(result.kind).toBe('certain');
+    expect(result.tooltip).toBe('100% ≥9, whole Library seen');
+  });
+});
+
+describe('libraryError', () => {
+  const sections = [
+    { name: 'Creatures', count: 104 },
+    { name: 'Lands', count: 37 },
+  ];
+
+  it('returns null for a sane Library', () => {
+    expect(oddsMath.libraryError(136, sections)).toBeNull();
+    expect(oddsMath.libraryError(104, sections)).toBeNull();
+  });
+
+  it('rejects NaN, 0, negatives, fractions and missing values', () => {
+    [NaN, 0, -3, 2.5, undefined, null].forEach((N) => {
+      expect(oddsMath.libraryError(N, sections)).toBe(
+        `Couldn't read the main deck count`
+      );
+    });
+  });
+
+  it('names the Section that exceeds the Library', () => {
+    expect(oddsMath.libraryError(99, sections)).toBe(
+      'Library (99) is smaller than Creatures (104)'
+    );
+  });
+
+  it('accepts an empty Section list', () => {
+    expect(oddsMath.libraryError(99, [])).toBeNull();
+  });
+});
