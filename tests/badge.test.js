@@ -471,6 +471,14 @@ describe('Alt+O and Alt+M', () => {
     expect(struck('odds')).toBe(false);
   });
 
+  it('flip once while held: autorepeats are swallowed but not toggled', () => {
+    price.setActive(true);
+    key(document.body, ALT_O);
+    const repeat = key(document.body, { ...ALT_O, repeat: true });
+    expect(repeat.defaultPrevented).toBe(true);
+    expect(struck('odds')).toBe(true);
+  });
+
   it('stop the key from reaching the page', () => {
     const spy = vi.fn();
     document.body.addEventListener('keydown', spy);

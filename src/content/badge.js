@@ -343,7 +343,7 @@
 
   /**
    * Alt+O / Alt+M (no Ctrl, Meta or Shift): flip Section odds / mana curve.
-   * Matches event.code. Ignored in editable fields.
+   * Matches event.code. Ignored in editable fields; autorepeats are swallowed.
    * @param {KeyboardEvent} event
    */
   function onKeydown(event) {
@@ -355,7 +355,8 @@
 
     event.preventDefault();
     event.stopPropagation();
-    toggleSetting(key);
+    // A held key autorepeats: flip once, or each repeat is a sync write.
+    if (!event.repeat) toggleSetting(key);
   }
 
   /**
