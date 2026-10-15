@@ -58,6 +58,7 @@ describe('defaults', () => {
   it('get() cannot be used to mutate internal state', async () => {
     await ds.ensureLoaded('a');
     ds.setOverride('type', 'Creatures', 2);
+    ds.setTurnsOverride('type', 'Creatures', 5);
     const copy = ds.get();
     expect(() => {
       copy.turns = 99;
@@ -65,8 +66,15 @@ describe('defaults', () => {
     expect(() => {
       copy.overrides.type.Creatures = 99;
     }).toThrow(TypeError);
+    expect(() => {
+      copy.overrides.type.Creatures.desired = 99;
+    }).toThrow(TypeError);
+    expect(() => {
+      copy.overrides.type.Creatures.turns = 99;
+    }).toThrow(TypeError);
     expect(ds.get().turns).toBe(3);
     expect(ds.desiredFor('type', 'Creatures')).toBe(2);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(5);
   });
 
   it('merges partial stored data over defaults', async () => {
@@ -96,8 +104,44 @@ describe('defaults', () => {
     expect(settings.turns).toBe(0);
     expect(settings.desired).toBe(1);
     expect(settings.sharedSlot).toBe('odds');
-    expect({ ...settings.overrides.type }).toEqual({ Low: 1, Round: 3 });
+    expect({ ...settings.overrides.type }).toEqual({
+      Low: { desired: 1 },
+      Round: { desired: 3 },
+    });
     expect(Object.keys(settings.overrides)).toEqual(['type']);
+  });
+
+  it('loads a legacy plain-number override as a desired override', async () => {
+    await chrome.storage.local.set({
+      [KEY('a')]: { overrides: { type: { Creatures: 2 } } },
+    });
+    await ds.ensureLoaded('a');
+    expect({ ...ds.get().overrides.type.Creatures }).toEqual({ desired: 2 });
+    expect(ds.desiredFor('type', 'Creatures')).toBe(2);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(3);
+  });
+
+  it('sanitises each field of a stored override entry', async () => {
+    await chrome.storage.local.set({
+      [KEY('a')]: {
+        overrides: {
+          type: {
+            Both: { desired: 2.6, turns: -1 },
+            TurnsOnly: { turns: 5 },
+            BadDesired: { desired: 'x', turns: 4 },
+            Empty: {},
+            Junk: { desired: null, turns: 'y' },
+            List: [2],
+          },
+        },
+      },
+    });
+    await ds.ensureLoaded('a');
+    const type = ds.get().overrides.type;
+    expect(Object.keys(type).sort()).toEqual(['BadDesired', 'Both', 'TurnsOnly']);
+    expect({ ...type.Both }).toEqual({ desired: 3, turns: 0 });
+    expect({ ...type.TurnsOnly }).toEqual({ turns: 5 });
+    expect({ ...type.BadDesired }).toEqual({ turns: 4 });
   });
 
   it('treats a non-object stored value as defaults', async () => {
@@ -171,6 +215,9 @@ describe('setters', () => {
     ds.setSharedSlot('bogus');
     ds.setOverride('type', 'Creatures', null);
     ds.setOverride('type', 'Creatures', 1);
+    ds.setTurnsOverride('type', 'Creatures', null);
+    ds.setTurnsOverride('type', 'Creatures', 3);
+    ds.resetOverride('type', 'Creatures');
     await vi.advanceTimersByTimeAsync(DEBOUNCE * 2);
     expect(sources).toEqual([]);
     expect(set).not.toHaveBeenCalled();
@@ -192,8 +239,8 @@ describe('overrides', () => {
       desired: 1,
       sharedSlot: 'odds',
       overrides: {
-        tag: { 'card advantage': 2 },
-        type: { Creatures: 3 },
+        tag: { 'card advantage': { desired: 2 } },
+        type: { Creatures: { desired: 3 } },
       },
     });
     expect(ds.desiredFor('tag', 'card advantage')).toBe(2);
@@ -274,7 +321,7 @@ describe('overrides', () => {
 
       const stored = (await chrome.storage.local.get(KEY('a')))[KEY('a')];
       expect(Object.hasOwn(stored.overrides.tag, name)).toBe(true);
-      expect(stored.overrides.tag[name]).toBe(5);
+      expect(stored.overrides.tag[name]).toEqual({ desired: 5 });
 
       ds = await load();
       await ds.ensureLoaded('a');
@@ -287,6 +334,22 @@ describe('overrides', () => {
     }
   );
 
+  it.each(['__proto__', 'constructor'])(
+    'round-trips a turns override for a Section named %s',
+    async (name) => {
+      ds.setTurnsOverride('tag', name, 6);
+      expect(ds.turnsFor('tag', name)).toBe(6);
+      expect(ds.turnsFor('tag', `not-${name}`)).toBe(3);
+      await ds.flush();
+      ds = await load();
+      await ds.ensureLoaded('a');
+      expect(ds.turnsFor('tag', name)).toBe(6);
+      ds.resetOverride('tag', name);
+      expect(ds.isOverridden('tag', name)).toBe(false);
+      expect(Object.keys(ds.get().overrides)).toEqual([]);
+    }
+  );
+
   it('does not pollute Object.prototype', async () => {
     ds.setOverride('__proto__', 'polluted', 2);
     await ds.flush();
@@ -294,6 +357,128 @@ describe('overrides', () => {
     await ds.ensureLoaded('a');
     expect({}.polluted).toBeUndefined();
     expect(ds.desiredFor('__proto__', 'polluted')).toBe(2);
+  });
+});
+
+describe('turns overrides', () => {
+  beforeEach(async () => {
+    await ds.ensureLoaded('a');
+  });
+
+  it('turnsFor falls back to the deck turns and follows it', () => {
+    expect(ds.turnsFor('type', 'Creatures')).toBe(3);
+    ds.setTurns(4);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(4);
+    ds.setTurnsOverride('type', 'Creatures', 6);
+    ds.setTurns(5);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(6);
+  });
+
+  it('round-trips a turns override in the nested shape, beside desired', async () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setOverride('type', 'Creatures', 2);
+    ds.setTurnsOverride('tag', 'ramp', 1);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE);
+    const stored = (await chrome.storage.local.get(KEY('a')))[KEY('a')];
+    expect(stored.overrides).toEqual({
+      type: { Creatures: { desired: 2, turns: 5 } },
+      tag: { ramp: { turns: 1 } },
+    });
+
+    ds = await load();
+    await ds.ensureLoaded('a');
+    expect(ds.turnsFor('type', 'Creatures')).toBe(5);
+    expect(ds.desiredFor('type', 'Creatures')).toBe(2);
+    expect(ds.turnsFor('tag', 'ramp')).toBe(1);
+    expect(ds.desiredFor('tag', 'ramp')).toBe(1);
+  });
+
+  it('dispatches change "override"', () => {
+    const sources = recordChanges();
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.resetOverride('type', 'Creatures');
+    expect(sources).toEqual(['override', 'override']);
+  });
+
+  it('isOverridden is true for a turns-only override', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    expect(ds.isOverridden('type', 'Creatures')).toBe(true);
+    expect(ds.isTurnsOverridden('type', 'Creatures')).toBe(true);
+    expect(ds.isDesiredOverridden('type', 'Creatures')).toBe(false);
+    expect(ds.desiredFor('type', 'Creatures')).toBe(1);
+  });
+
+  it('isOverridden is false when the turns override equals a changed deck turns', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setTurns(5);
+    expect(ds.isOverridden('type', 'Creatures')).toBe(false);
+  });
+
+  it('a turns value equal to the deck turns deletes the field, then the entry', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setOverride('type', 'Creatures', 2);
+    ds.setTurnsOverride('type', 'Creatures', 3);
+    expect({ ...ds.get().overrides.type.Creatures }).toEqual({ desired: 2 });
+    ds.setOverride('type', 'Creatures', 1);
+    expect(ds.get().overrides.type).toBeUndefined();
+    expect(Object.keys(ds.get().overrides)).toEqual([]);
+  });
+
+  it('resetting desired keeps the turns field', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setOverride('type', 'Creatures', 2);
+    ds.setOverride('type', 'Creatures', null);
+    expect({ ...ds.get().overrides.type.Creatures }).toEqual({ turns: 5 });
+    ds.setTurnsOverride('type', 'Creatures', null);
+    expect(ds.get().overrides.type).toBeUndefined();
+  });
+
+  it('clamps a turns override to an integer >= 0 with no upper bound', () => {
+    ds.setTurnsOverride('type', 'Creatures', -4);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(0);
+    ds.setTurnsOverride('type', 'Creatures', 2.4);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(2);
+    ds.setTurnsOverride('type', 'Creatures', 500);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(500);
+    ds.setTurnsOverride('type', 'Creatures', NaN);
+    ds.setTurnsOverride('type', 'Creatures', '7');
+    expect(ds.turnsFor('type', 'Creatures')).toBe(500);
+  });
+
+  it('resetOverride clears both fields and prunes the bucket', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setOverride('type', 'Creatures', 2);
+    ds.setOverride('type', 'Lands', 3);
+    ds.resetOverride('type', 'Creatures');
+    expect(ds.isOverridden('type', 'Creatures')).toBe(false);
+    expect(ds.turnsFor('type', 'Creatures')).toBe(3);
+    expect(ds.desiredFor('type', 'Creatures')).toBe(1);
+    expect(Object.keys(ds.get().overrides.type)).toEqual(['Lands']);
+    ds.resetOverride('type', 'Lands');
+    expect(Object.keys(ds.get().overrides)).toEqual([]);
+  });
+
+  it('ignores turns overrides until the deck has loaded', async () => {
+    ds = await load();
+    const loading = ds.ensureLoaded('a');
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    await loading;
+    expect(ds.turnsFor('type', 'Creatures')).toBe(3);
+  });
+
+  it('an external value differing only in entry key order is not a change', () => {
+    ds.setTurnsOverride('type', 'Creatures', 5);
+    ds.setOverride('type', 'Creatures', 2);
+    return ds.flush().then(() => {
+      const sources = recordChanges();
+      ds.applyExternal('a', {
+        turns: 3,
+        desired: 1,
+        sharedSlot: 'odds',
+        overrides: { type: { Creatures: { turns: 5, desired: 2 } } },
+      });
+      expect(sources).toEqual([]);
+    });
   });
 });
 
@@ -412,7 +597,7 @@ describe('ensureLoaded', () => {
 
     const stored = await chrome.storage.local.get([KEY('a'), KEY('b')]);
     expect(stored[KEY('a')].turns).toBe(5);
-    expect(stored[KEY('a')].overrides.type.Creatures).toBe(2);
+    expect(stored[KEY('a')].overrides.type.Creatures).toEqual({ desired: 2 });
     expect(stored[KEY('b')].turns).toBe(3);
     expect(stored[KEY('b')].desired).toBe(2);
   });

@@ -654,7 +654,9 @@ describe('content index Section odds wiring', () => {
     await deckSettings.flush();
 
     expect(deckSettings.desiredFor('type', 'Creatures')).toBe(2);
-    expect((await storedOverrides('abc')).type.Creatures).toBe(2);
+    expect((await storedOverrides('abc')).type.Creatures).toEqual({
+      desired: 2,
+    });
   });
 
   it('re-keys the badge odds text on a deck change with odds and curve off', async () => {

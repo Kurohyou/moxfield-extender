@@ -1,7 +1,8 @@
 /**
  * Per-deck settings for Moxfield Extended
- * By turn, At least, the shared-slot choice and per-Section desired overrides,
- * kept in chrome.storage.local under `deck:<deckId>` (spec 2.5, 4).
+ * By turn, At least, the shared-slot choice and per-Section overrides of
+ * At least and By turn, kept in chrome.storage.local under `deck:<deckId>`
+ * (spec 2.5, 4). An override entry is `{ desired?, turns? }`.
  */
 
 (function () {
@@ -10,6 +11,11 @@
   const LOG_PREFIX = '[Moxfield Extended]';
   const DEBOUNCE_MS = 300;
   const SLOTS = ['odds', 'curve'];
+  // Override fields, in their canonical order, and each one's minimum.
+  const FIELDS = [
+    ['desired', 1],
+    ['turns', 0],
+  ];
 
   const events = new EventTarget();
 
@@ -62,6 +68,40 @@
   }
 
   /**
+   * A fresh override entry holding only the fields `entry` has, in canonical
+   * order.
+   * @param {{desired?: number, turns?: number}} entry
+   * @returns {{desired?: number, turns?: number}}
+   */
+  function copyEntry(entry) {
+    const copy = {};
+    FIELDS.forEach(([field]) => {
+      if (Object.hasOwn(entry, field)) copy[field] = entry[field];
+    });
+    return copy;
+  }
+
+  /**
+   * A valid override entry from a stored value, or null when nothing in it is
+   * usable. A plain number is the old shape: a desired override.
+   * @param {*} value
+   * @returns {{desired?: number, turns?: number}|null}
+   */
+  function sanitizeEntry(value) {
+    if (typeof value === 'number') {
+      const desired = clampInt(value, 1);
+      return desired === null ? null : { desired };
+    }
+    const entry = {};
+    const stored = Object.fromEntries(entriesOf(value));
+    FIELDS.forEach(([field, min]) => {
+      const n = clampInt(stored[field], min);
+      if (n !== null) entry[field] = n;
+    });
+    return Object.keys(entry).length > 0 ? entry : null;
+  }
+
+  /**
    * Build valid settings from stored data, merged over defaults.
    * @param {*} raw - Whatever storage returned
    * @returns {Object}
@@ -74,11 +114,11 @@
     if (SLOTS.includes(data.sharedSlot)) next.sharedSlot = data.sharedSlot;
     entriesOf(data.overrides).forEach(([groupBy, bucket]) => {
       entriesOf(bucket).forEach(([name, value]) => {
-        const desired = clampInt(value, 1);
-        if (desired === null) return;
+        const entry = sanitizeEntry(value);
+        if (entry === null) return;
         next.overrides[groupBy] =
           next.overrides[groupBy] || Object.create(null);
-        next.overrides[groupBy][name] = desired;
+        next.overrides[groupBy][name] = entry;
       });
     });
     return next;
@@ -93,7 +133,12 @@
     const overrides = Object.fromEntries(
       Object.entries(settings.overrides).map(([groupBy, bucket]) => [
         groupBy,
-        Object.fromEntries(Object.entries(bucket)),
+        Object.fromEntries(
+          Object.entries(bucket).map(([name, entry]) => [
+            name,
+            copyEntry(entry),
+          ])
+        ),
       ])
     );
     return {
@@ -114,9 +159,15 @@
       .sort()
       .map((groupBy) => [
         groupBy,
-        Object.entries(value.overrides[groupBy]).sort(([a], [b]) =>
-          a < b ? -1 : 1
-        ),
+        Object.entries(value.overrides[groupBy])
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          // Fields by position, so their key order never matters.
+          .map(([name, entry]) => [
+            name,
+            FIELDS.map(([field]) =>
+              Object.hasOwn(entry, field) ? entry[field] : null
+            ),
+          ]),
       ]);
     return JSON.stringify([
       value.turns,
@@ -146,9 +197,11 @@
     if (!snapshot) {
       const overrides = Object.create(null);
       Object.entries(settings.overrides).forEach(([groupBy, bucket]) => {
-        overrides[groupBy] = Object.freeze(
-          Object.assign(Object.create(null), bucket)
-        );
+        const copy = Object.create(null);
+        Object.entries(bucket).forEach(([name, entry]) => {
+          copy[name] = Object.freeze(copyEntry(entry));
+        });
+        overrides[groupBy] = Object.freeze(copy);
       });
       snapshot = Object.freeze({
         ...settings,
@@ -296,53 +349,158 @@
   }
 
   /**
+   * A Section's override entry, or null when it has none.
+   * @param {string} groupBy - Group-by mode, e.g. 'type'
+   * @param {string} name - Section name
+   * @returns {{desired?: number, turns?: number}|null}
+   */
+  function entryFor(groupBy, name) {
+    const bucket = settings.overrides[groupBy];
+    return bucket && Object.hasOwn(bucket, name) ? bucket[name] : null;
+  }
+
+  /**
+   * One field for a Section: its override, else the deck default.
+   * @param {'desired'|'turns'} field
+   * @param {string} groupBy
+   * @param {string} name
+   * @returns {number}
+   */
+  function fieldFor(field, groupBy, name) {
+    const entry = entryFor(groupBy, name);
+    return entry && Object.hasOwn(entry, field) ? entry[field] : settings[field];
+  }
+
+  /**
    * Desired count for a Section: its override, else the deck default.
    * @param {string} groupBy - Group-by mode, e.g. 'type'
    * @param {string} name - Section name
    * @returns {number}
    */
   function desiredFor(groupBy, name) {
-    const bucket = settings.overrides[groupBy];
-    return bucket && Object.hasOwn(bucket, name)
-      ? bucket[name]
-      : settings.desired;
+    return fieldFor('desired', groupBy, name);
   }
 
   /**
-   * Whether a Section's desired differs from the deck default (the dotted underline).
+   * By turn for a Section: its override, else the deck turns.
+   * @param {string} groupBy - Group-by mode, e.g. 'type'
+   * @param {string} name - Section name
+   * @returns {number}
+   */
+  function turnsFor(groupBy, name) {
+    return fieldFor('turns', groupBy, name);
+  }
+
+  /**
+   * Whether a Section's desired differs from the deck default.
+   * @param {string} groupBy
+   * @param {string} name
+   * @returns {boolean}
+   */
+  function isDesiredOverridden(groupBy, name) {
+    return desiredFor(groupBy, name) !== settings.desired;
+  }
+
+  /**
+   * Whether a Section's By turn differs from the deck turns.
+   * @param {string} groupBy
+   * @param {string} name
+   * @returns {boolean}
+   */
+  function isTurnsOverridden(groupBy, name) {
+    return turnsFor(groupBy, name) !== settings.turns;
+  }
+
+  /**
+   * Whether either of a Section's values differs from the deck default (the
+   * dotted underline).
    * @param {string} groupBy
    * @param {string} name
    * @returns {boolean}
    */
   function isOverridden(groupBy, name) {
-    return desiredFor(groupBy, name) !== settings.desired;
+    return (
+      isDesiredOverridden(groupBy, name) || isTurnsOverridden(groupBy, name)
+    );
   }
 
   /**
-   * Set or clear a Section's desired override. null resets it; so does a value
-   * equal to the deck default. Otherwise an integer >= 1. Orphaned overrides
-   * are kept; only a Group-by bucket left empty is pruned.
+   * Remove a Section's entry, and its Group-by bucket once empty.
+   * @param {string} groupBy
+   * @param {string} name
+   */
+  function deleteEntry(groupBy, name) {
+    const bucket = settings.overrides[groupBy];
+    delete bucket[name];
+    if (Object.keys(bucket).length === 0) delete settings.overrides[groupBy];
+  }
+
+  /**
+   * Set or clear one field of a Section's override. null clears it; so does a
+   * value equal to the deck default. Otherwise an integer >= `min`. An entry
+   * left with no fields is removed, and so is a Group-by bucket left empty.
+   * Orphaned overrides are kept.
+   * @param {'desired'|'turns'} field
+   * @param {number} min
+   * @param {string} groupBy
+   * @param {string} name
+   * @param {number|null} n
+   */
+  function setField(field, min, groupBy, name, n) {
+    if (!loaded) return;
+    const reset = n === null || n === undefined;
+    const value = reset ? null : clampInt(n, min);
+    if (!reset && value === null) return; // not a number
+    const entry = entryFor(groupBy, name);
+    const has = !!entry && Object.hasOwn(entry, field);
+
+    if (value === null || value === settings[field]) {
+      if (!has) return;
+      delete entry[field];
+      if (Object.keys(entry).length === 0) deleteEntry(groupBy, name);
+    } else {
+      if (has && entry[field] === value) return;
+      if (entry) {
+        entry[field] = value;
+      } else {
+        settings.overrides[groupBy] =
+          settings.overrides[groupBy] || Object.create(null);
+        settings.overrides[groupBy][name] = { [field]: value };
+      }
+    }
+    commit('override');
+  }
+
+  /**
+   * Set or clear a Section's desired override: an integer >= 1, no upper
+   * bound. null, or the deck default, clears it.
    * @param {string} groupBy
    * @param {string} name
    * @param {number|null} n
    */
   function setOverride(groupBy, name, n) {
-    if (!loaded) return;
-    const reset = n === null || n === undefined;
-    const value = reset ? null : clampInt(n, 1);
-    if (!reset && value === null) return; // not a number
-    const bucket = settings.overrides[groupBy];
-    const has = !!bucket && Object.hasOwn(bucket, name);
+    setField('desired', 1, groupBy, name, n);
+  }
 
-    if (value === null || value === settings.desired) {
-      if (!has) return;
-      delete bucket[name];
-      if (Object.keys(bucket).length === 0) delete settings.overrides[groupBy];
-    } else {
-      if (has && bucket[name] === value) return;
-      settings.overrides[groupBy] = bucket || Object.create(null);
-      settings.overrides[groupBy][name] = value;
-    }
+  /**
+   * Set or clear a Section's By turn override: an integer >= 0, no upper
+   * bound. null, or the deck turns, clears it.
+   * @param {string} groupBy
+   * @param {string} name
+   * @param {number|null} n
+   */
+  function setTurnsOverride(groupBy, name, n) {
+    setField('turns', 0, groupBy, name, n);
+  }
+
+  /**
+   * Clear both of a Section's overrides.
+   * @param {string} groupBy
+   * @param {string} name
+   */
+  function resetOverride(groupBy, name) {
+    if (!loaded || !entryFor(groupBy, name)) return;
+    deleteEntry(groupBy, name);
     commit('override');
   }
 
@@ -359,8 +517,13 @@
     setDesired,
     setSharedSlot,
     desiredFor,
+    turnsFor,
     isOverridden,
+    isDesiredOverridden,
+    isTurnsOverridden,
     setOverride,
+    setTurnsOverride,
+    resetOverride,
     applyExternal,
     flush,
   };
