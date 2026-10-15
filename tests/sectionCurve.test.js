@@ -149,9 +149,7 @@ describe('sectionCurve.view', () => {
       ]),
       null
     );
-    expect(el.title.split('\n')[3]).toBe(
-      '1 card with no mana cost not shown'
-    );
+    expect(el.title.split('\n')[3]).toBe('1 card with no mana cost not shown');
   });
 
   it('omits the costless line when every card has a cost', () => {

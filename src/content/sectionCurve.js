@@ -98,7 +98,10 @@
    */
   function view(section, prevEl) {
     const { manaValue, domHelpers } = window.MoxfieldExtended;
-    const curve = manaValue.buildCurve(section.rows, domHelpers.extractQuantity);
+    const curve = manaValue.buildCurve(
+      section.rows,
+      domHelpers.extractQuantity
+    );
     if (!curve) return null;
 
     ensureStyles();

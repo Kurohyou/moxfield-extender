@@ -18,7 +18,8 @@ beforeEach(async () => {
   await import('../src/content/popover.js');
   popover = window.MoxfieldExtended.popover;
   document.head.innerHTML = '';
-  document.body.innerHTML = '<button id="anchor">open</button><p id="outside">x</p>';
+  document.body.innerHTML =
+    '<button id="anchor">open</button><p id="outside">x</p>';
   anchor = document.getElementById('anchor');
 });
 
