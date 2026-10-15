@@ -250,8 +250,9 @@
    * is inside [data-mox], or when it added or removed nodes and every one of
    * them is, or is inside, [data-mox].
    *
-   * index.js observes childList only, so the characterData handling (a text
-   * node target inside [data-mox]) is defensive.
+   * index.js observes childList and characterData, so a characterData record
+   * whose text node target sits inside [data-mox] (our chip or badge text) is
+   * own, while one in Moxfield's text (a header "(n)", the footer) is not.
    * @param {MutationRecord} mutation
    * @returns {boolean}
    */

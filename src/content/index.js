@@ -180,12 +180,18 @@ function setupMutationObserver() {
   // Observe changes to the deck list container
   const observer = new MutationObserver((mutations) => {
     // Ignore mutations caused by our own rendering, or each render would
-    // schedule another refresh forever. Then check for relevant DOM changes.
+    // schedule another refresh forever. Then check for relevant DOM changes:
+    // added or removed nodes, or text React rewrote in place (a header's
+    // "(n)" or the footer's "N main deck" changes a text node's nodeValue).
     const { isOwnMutation } = window.MoxfieldExtended.domHelpers;
     const hasRelevantChanges = mutations
       .filter((mutation) => !isOwnMutation(mutation))
       .some((mutation) => {
-        return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+        return (
+          mutation.type === 'characterData' ||
+          mutation.addedNodes.length > 0 ||
+          mutation.removedNodes.length > 0
+        );
       });
 
     if (hasRelevantChanges && window.MoxfieldExtended.state.initialized) {
@@ -224,6 +230,7 @@ function setupMutationObserver() {
   observer.observe(document.body, {
     childList: true,
     subtree: true,
+    characterData: true,
   });
 
   console.log(LOG_PREFIX, 'MutationObserver set up');

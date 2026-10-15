@@ -316,6 +316,84 @@ describe('content index Section odds wiring', () => {
     expect(render).toHaveBeenCalled();
   });
 
+  /**
+   * Load a deck page, wait for the first chips, and switch to fake timeouts.
+   * @returns {Promise<string>} The Creatures chip's text
+   */
+  async function loadWithChips() {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+    );
+    await settle();
+    useFakeTimeouts();
+    return header('Creatures').querySelector('.mox-odds').textContent;
+  }
+
+  /**
+   * The single text node of an element.
+   * @param {Element} el
+   * @returns {Text}
+   */
+  function textNode(el) {
+    const node = [...el.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+    expect(node).toBeDefined();
+    return node;
+  }
+
+  it('refreshes when React rewrites a header count in place', async () => {
+    const before = await loadWithChips();
+    const refresh = vi.spyOn(window.MoxfieldExtended.headerCluster, 'refresh');
+    const count = header('Creatures').querySelector('span[title]').nextElementSibling;
+
+    // React sets the number's nodeValue: a characterData record only.
+    textNode(count).nodeValue = '(5)';
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(249);
+    expect(refresh).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds').textContent).not.toBe(
+        before
+      )
+    );
+  });
+
+  it('refreshes when React rewrites the footer count in place', async () => {
+    const before = await loadWithChips();
+    const refresh = vi.spyOn(window.MoxfieldExtended.headerCluster, 'refresh');
+    const footer = document.querySelector('div.text-nowrap.d-inline-block');
+    expect(footer.textContent).toBe('100 main deck');
+
+    textNode(footer).nodeValue = '60 main deck';
+    await runObserverDebounce();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds').textContent).not.toBe(
+        before
+      )
+    );
+  });
+
+  it('ignores text changes inside its own nodes', async () => {
+    await loadWithChips();
+    const refresh = vi.spyOn(window.MoxfieldExtended.headerCluster, 'refresh');
+    const chip = header('Creatures').querySelector('.mox-odds');
+    const own = document.createTextNode('x');
+    chip.appendChild(own);
+    // The append itself is own (childList inside [data-mox]); so is the edit.
+    await runObserverDebounce();
+    own.nodeValue = 'y';
+    await runObserverDebounce();
+
+    expect(observerRefreshes()).toBe(0);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it('does not refresh the headers from the observer while both are off', async () => {
     await loadContent({
       deck: true,
