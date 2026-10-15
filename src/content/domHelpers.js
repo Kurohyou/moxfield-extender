@@ -132,23 +132,29 @@
   }
 
   /**
-   * Read every Section of the deck list, Boards included, in DOM order.
-   * All queries are scoped to section.deckview article.
+   * Get the mainboard Sections: every Section that is not a special Board
+   * (Commander, Sideboard, ...). The name comes from span[title], never from
+   * text parsing, because names may contain "(". All queries are scoped to
+   * section.deckview article.
    * @returns {Array<{ul: Element, headerLi: Element, link: Element, name: string,
-   *   count: number|null, rows: Element[]}>}
+   *   count: number|null, rows: Element[]}>} Sections in DOM order. `count` is an
+   *   integer, or null when the header has no readable "(n)".
    */
-  function readAllSections() {
+  function getMainboardSections() {
     const sections = [];
     document.querySelectorAll(SELECTORS.sectionHeader).forEach((link) => {
       const titleSpan = link.querySelector(':scope > span[title]');
       if (!titleSpan) return;
+
+      const name = titleSpan.getAttribute('title');
+      if (SPECIAL_BOARD_TITLES.has(name)) return;
 
       const headerLi = link.closest('li');
       sections.push({
         ul: headerLi.parentElement,
         headerLi,
         link,
-        name: titleSpan.getAttribute('title'),
+        name,
         count: readSectionCount(link, titleSpan),
         rows: getCardsInSection(link),
       });
@@ -157,15 +163,18 @@
   }
 
   /**
-   * Get the mainboard Sections: every Section that is not a special Board
-   * (Commander, Sideboard, ...). The name comes from span[title], never from
-   * text parsing, because names may contain "(".
-   * @returns {Array<{ul: Element, headerLi: Element, link: Element, name: string,
-   *   count: number|null, rows: Element[]}>} Sections in DOM order. `count` is an
-   *   integer, or null when the header has no readable "(n)".
+   * Read the Commander Section header's "(n)" without building any rows.
+   * @returns {{found: boolean, count: number|null}} `found` is false when there
+   *   is no Commander Section; `count` is null when its "(n)" is unreadable
    */
-  function getMainboardSections() {
-    return readAllSections().filter((section) => !SPECIAL_BOARD_TITLES.has(section.name));
+  function readCommanderCount() {
+    for (const link of document.querySelectorAll(SELECTORS.sectionHeader)) {
+      const titleSpan = link.querySelector(':scope > span[title]');
+      if (titleSpan?.getAttribute('title') === 'Commander') {
+        return { found: true, count: readSectionCount(link, titleSpan) };
+      }
+    }
+    return { found: false, count: null };
   }
 
   /**
@@ -206,8 +215,8 @@
     if (!footer) return { ok: false, reason: FOOTER_ERROR };
 
     const total = parseInt(footer.textContent.match(FOOTER_PATTERN)[1], 10);
-    const commander = readAllSections().find((section) => section.name === 'Commander');
-    if (!commander) return { ok: true, value: total };
+    const commander = readCommanderCount();
+    if (!commander.found) return { ok: true, value: total };
     if (commander.count === null) return { ok: false, reason: COMMANDER_ERROR };
 
     return { ok: true, value: total - commander.count };
@@ -240,6 +249,9 @@
    * the observer in index.js can ignore it. A mutation is own when its target
    * is inside [data-mox], or when it added or removed nodes and every one of
    * them is, or is inside, [data-mox].
+   *
+   * index.js observes childList only, so the characterData handling (a text
+   * node target inside [data-mox]) is defensive.
    * @param {MutationRecord} mutation
    * @returns {boolean}
    */

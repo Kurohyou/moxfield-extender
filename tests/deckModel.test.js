@@ -221,7 +221,10 @@ describe('readLibrary', () => {
     });
   });
 
-  it.each([['abc main deck'], ['']])('reports a garbled footer (%j)', (footerText) => {
+  it.each([
+    ['garbled footer text', 'abc main deck'],
+    ['empty footer text', ''],
+  ])('reports %s', (_label, footerText) => {
     buildDeck({ footerText, sections: [{ title: 'Creatures', rows: [{ qty: 3 }] }] });
     const result = domHelpers.readLibrary();
     expect(result.ok).toBe(false);
@@ -424,8 +427,46 @@ describe('isOwnMutation', () => {
     const theirs = theirSpan();
     sections[0].headerLi.appendChild(theirs);
 
-    const records = await recordMutations(() => theirs.replaceWith(moxSpan()));
-    expect(records.some((r) => !domHelpers.isOwnMutation(r))).toBe(true);
+    const ours = moxSpan();
+    const records = await recordMutations(() => theirs.replaceWith(ours));
+
+    expect(records).toHaveLength(1);
+    expect(records[0].type).toBe('childList');
+    expect(records[0].target).toBe(sections[0].headerLi);
+    expect(Array.from(records[0].addedNodes)).toEqual([ours]);
+    expect(Array.from(records[0].removedNodes)).toEqual([theirs]);
+    expect(domHelpers.isOwnMutation(records[0])).toBe(false);
+  });
+
+  it('is not own when React replaces a header li that holds our cluster', async () => {
+    const { sections, ...deck } = buildDeck({
+      sections: [{ title: 'Creatures', rows: [{ qty: 1 }] }],
+    });
+    const oldHeader = sections[0].headerLi;
+    oldHeader.appendChild(moxSpan());
+    const newHeader = oldHeader.cloneNode(true);
+
+    const records = await recordMutations(() => oldHeader.replaceWith(newHeader));
+
+    expect(deck.root.contains(newHeader)).toBe(true);
+    expect(records).toHaveLength(1);
+    expect(records[0].target).toBe(sections[0].ul);
+    expect(Array.from(records[0].removedNodes)).toEqual([oldHeader]);
+    expect(domHelpers.isOwnMutation(records[0])).toBe(false);
+  });
+
+  it('is own when we re-append our cluster as the last child of its li', async () => {
+    const { sections } = buildDeck({ sections: [{ title: 'Creatures', rows: [{ qty: 1 }] }] });
+    const header = sections[0].headerLi;
+    const cluster = moxSpan();
+    header.appendChild(cluster);
+    header.appendChild(theirSpan('React price'));
+
+    const records = await recordMutations(() => header.appendChild(cluster));
+
+    expect(records.length).toBeGreaterThan(0);
+    expect(header.lastElementChild).toBe(cluster);
+    expect(records.every((r) => domHelpers.isOwnMutation(r))).toBe(true);
   });
 
   it('is not own when Moxfield adds a bare text node', async () => {
