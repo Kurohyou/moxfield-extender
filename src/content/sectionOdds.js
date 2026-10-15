@@ -81,7 +81,7 @@
   margin-top: 6px;
   padding: 0;
   font-size: inherit;
-  color: var(--bs-link-color, inherit);
+  color: inherit;
   background: none;
   border: 0;
   text-decoration: underline;
@@ -229,11 +229,18 @@
       <div class="mox-stepper__odds"></div>
       <div class="mox-stepper__row">
         <span>At least</span>
-        <button type="button" class="mox-stepper__dec" aria-label="Fewer">−</button>
+        <button type="button" class="mox-stepper__dec">−</button>
         <span class="mox-stepper__value"></span>
-        <button type="button" class="mox-stepper__inc" aria-label="More">+</button>
+        <button type="button" class="mox-stepper__inc">+</button>
       </div>
       <button type="button" class="mox-stepper__reset" hidden></button>`;
+    // Set through the DOM, not markup, so a Section name is never parsed as HTML.
+    root
+      .querySelector('.mox-stepper__dec')
+      .setAttribute('aria-label', `Decrease at-least count for ${name}`);
+    root
+      .querySelector('.mox-stepper__inc')
+      .setAttribute('aria-label', `Increase at-least count for ${name}`);
 
     /**
      * Step the Section's desired count, read fresh at click time.
@@ -321,7 +328,8 @@
    * Redraws on deck settings changes until closed.
    * @param {Element} anchorEl - The chip, or a shared slot showing the curve
    * @param {string} sectionName
-   * @returns {Object|null} The popover handle, or null when the Section is missing
+   * @returns {Object|null} The popover handle, or null when it did not open
+   *   (the Section is missing)
    */
   function openStepper(anchorEl, sectionName) {
     const { domHelpers, deckSettings, popover } = ns();
@@ -337,12 +345,15 @@
       anchorEl,
       (container, self) => renderStepper(container, self, sectionName),
       {
+        label: `Odds override for ${sectionName}`,
         onClose: () => {
           deckSettings.events.removeEventListener('change', onChange);
           if (stepperHandle === handle) stepperHandle = null;
         },
       }
     );
+    // The first render may already have closed it.
+    if (!handle.el.isConnected) return null;
     deckSettings.events.addEventListener('change', onChange);
     stepperHandle = handle;
     return handle;
@@ -359,7 +370,8 @@
 
   /**
    * Right-click on a chip, or on a shared slot showing the curve, opens the
-   * stepper instead of the browser menu.
+   * stepper instead of the browser menu. The menu is only suppressed when
+   * the stepper actually opened.
    * @param {MouseEvent} event
    */
   function onContextMenu(event) {
@@ -368,11 +380,10 @@
     const anchor = target.closest('.mox-odds') || target.closest(SHARED_CURVE);
     if (!anchor) return;
     const name = sectionNameOf(anchor);
-    if (name === null) return;
+    if (name === null || !openStepper(anchor, name)) return;
 
     event.preventDefault();
     event.stopPropagation();
-    openStepper(anchor, name);
   }
 
   /**
@@ -434,6 +445,13 @@
     event.stopPropagation();
   }
 
+  /**
+   * Forget the hovered Section when the pointer or focus leaves the page.
+   */
+  function clearHover() {
+    hoveredName = null;
+  }
+
   const LISTENERS = [
     ['contextmenu', onContextMenu],
     ['click', onClick],
@@ -450,6 +468,10 @@
     LISTENERS.forEach(([type, listener]) =>
       document.addEventListener(type, listener, true)
     );
+    // Not capture: mouseleave fires per element, and only the document's own
+    // one means the pointer left the page.
+    document.addEventListener('mouseleave', clearHover);
+    window.addEventListener('blur', clearHover);
   }
 
   /**
@@ -460,6 +482,8 @@
     LISTENERS.forEach(([type, listener]) =>
       document.removeEventListener(type, listener, true)
     );
+    document.removeEventListener('mouseleave', clearHover);
+    window.removeEventListener('blur', clearHover);
     initialized = false;
     hoveredName = null;
     if (stepperHandle) stepperHandle.close();

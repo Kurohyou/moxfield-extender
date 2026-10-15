@@ -11,6 +11,8 @@
   // Gap between the anchor and the popover, and the minimum viewport margin.
   const OFFSET_PX = 4;
   const MARGIN_PX = 8;
+  const DEFAULT_LABEL = 'Moxfield Extended';
+  const SCROLL_OPTIONS = { capture: true, passive: true };
 
   const CSS = `
 .mox-popover {
@@ -21,7 +23,7 @@
   padding: 8px 10px;
   font-size: 0.8125rem;
   line-height: 1.4;
-  color: var(--bs-body-color, inherit);
+  color: var(--bs-body-color, #212529);
   background: var(--bs-body-bg, #fff);
   border: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.2));
   border-radius: 6px;
@@ -64,9 +66,10 @@
    *   body's content: the root is not cleared between runs.
    * @param {Object} [options]
    * @param {function(): void} [options.onClose] - Called once, after closing
+   * @param {string} [options.label] - Accessible name of the dialog
    * @returns {{el: HTMLElement, update: function(): void, close: function(): void}}
    */
-  function open(anchorEl, render, { onClose } = {}) {
+  function open(anchorEl, render, { onClose, label } = {}) {
     close();
     ensureStyles();
 
@@ -74,17 +77,29 @@
     el.className = 'mox-popover';
     el.setAttribute('data-mox', '');
     el.style.position = 'fixed';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', label || DEFAULT_LABEL);
 
     let closed = false;
+    let framePending = false;
+    let frame = null;
     const observer = new MutationObserver(() => {
       if (!anchorEl.isConnected) closeThis();
     });
 
     /**
      * Place the popover below the anchor, right-aligned, inside the viewport.
+     * After the first placement, an anchor with an empty box (hidden) closes
+     * the popover. The first placement skips that check, so a popover still
+     * opens where layout reports nothing (jsdom).
+     * @param {boolean} initial - True on open
      */
-    function position() {
+    function position(initial) {
       const rect = anchorEl.getBoundingClientRect();
+      if (!initial && rect.width === 0 && rect.height === 0) {
+        closeThis();
+        return;
+      }
       const width = el.offsetWidth;
       const height = el.offsetHeight;
       const maxLeft = window.innerWidth - MARGIN_PX - width;
@@ -99,20 +114,42 @@
     }
 
     /**
-     * Re-run render and re-position. Does nothing once closed.
+     * Run render, then position. Does nothing once closed.
+     * @param {boolean} initial - True on open
      */
-    function update() {
+    function draw(initial) {
       if (closed) return;
       render(el, handle);
-      if (!closed) position();
+      if (!closed) position(initial);
     }
 
     /**
-     * Close on Esc.
+     * Re-run render and re-position.
+     */
+    function update() {
+      draw(false);
+    }
+
+    /**
+     * Re-position on scroll or resize, at most once per frame.
+     */
+    function schedulePosition() {
+      if (framePending) return;
+      framePending = true;
+      frame = requestAnimationFrame(() => {
+        framePending = false;
+        if (!closed) position(false);
+      });
+    }
+
+    /**
+     * Close on Esc, keeping the key from Moxfield's handlers.
      * @param {KeyboardEvent} event
      */
     function onKeydown(event) {
-      if (event.key === 'Escape') closeThis();
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      closeThis();
     }
 
     /**
@@ -135,6 +172,9 @@
       if (current === handle) current = null;
       document.removeEventListener('keydown', onKeydown, true);
       document.removeEventListener('mousedown', onMousedown, true);
+      window.removeEventListener('scroll', schedulePosition, SCROLL_OPTIONS);
+      window.removeEventListener('resize', schedulePosition);
+      if (framePending) cancelAnimationFrame(frame);
       observer.disconnect();
       el.remove();
       if (onClose) onClose();
@@ -146,9 +186,12 @@
     document.body.appendChild(el);
     document.addEventListener('keydown', onKeydown, true);
     document.addEventListener('mousedown', onMousedown, true);
+    // Capture sees scrolls of any element; scroll events do not bubble.
+    window.addEventListener('scroll', schedulePosition, SCROLL_OPTIONS);
+    window.addEventListener('resize', schedulePosition);
     observer.observe(document.body, { childList: true, subtree: true });
 
-    update();
+    draw(true);
     return handle;
   }
 

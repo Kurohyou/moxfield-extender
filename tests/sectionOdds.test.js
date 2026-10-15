@@ -156,6 +156,18 @@ beforeEach(async () => {
     settings: { sectionOddsEnabled: true, sectionCurveEnabled: true },
   };
   await deckSettings.ensureLoaded('abc');
+  // jsdom has no layout. Give every element a visible box, or the popover
+  // treats the stepper's anchor as hidden and closes on update().
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+    top: 100,
+    bottom: 120,
+    left: 500,
+    right: 540,
+    width: 40,
+    height: 20,
+    x: 500,
+    y: 100,
+  });
   sectionOdds.init();
 });
 
@@ -364,6 +376,21 @@ describe('Alt+= / Alt+−', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it('forgets the hovered Section when the window loses focus', () => {
+    hover(section('Creatures').rows[0]);
+    window.dispatchEvent(new Event('blur'));
+    const event = key(document.body, ALT_PLUS);
+    expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('forgets the hovered Section when the pointer leaves the page', () => {
+    hover(section('Creatures').rows[0]);
+    document.dispatchEvent(new MouseEvent('mouseleave'));
+    key(document.body, ALT_PLUS);
+    expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
+  });
+
   it('init() is idempotent: one keypress steps once', () => {
     sectionOdds.init();
     hover(section('Creatures').rows[0]);
@@ -418,6 +445,15 @@ describe('chip clicks', () => {
     s.headerLi.appendChild(cluster);
 
     const event = mouse(cluster.firstElementChild, 'contextmenu');
+    expect(event.defaultPrevented).toBe(false);
+    expect(popover.isOpen()).toBe(false);
+  });
+
+  it('leaves the menu alone when the stepper cannot open', () => {
+    const header = document.querySelector('section.deckview article > ul > li');
+    const chip = sectionOdds.view(section('Creatures'), ctxFor(), null);
+    header.appendChild(chip); // a chip in the Commander header
+    const event = mouse(chip, 'contextmenu');
     expect(event.defaultPrevented).toBe(false);
     expect(popover.isOpen()).toBe(false);
   });
@@ -477,6 +513,23 @@ describe('stepper', () => {
   const value = () =>
     stepper().querySelector('.mox-stepper__value').textContent;
   const reset = () => stepper().querySelector('.mox-stepper__reset');
+
+  it('labels the dialog and its buttons with the Section name', () => {
+    openCreatures();
+    expect(stepper().getAttribute('aria-label')).toContain('Creatures');
+    expect(dec().getAttribute('aria-label')).toBe(
+      'Decrease at-least count for Creatures'
+    );
+    expect(inc().getAttribute('aria-label')).toBe(
+      'Increase at-least count for Creatures'
+    );
+  });
+
+  it('does not colour Reset with the link colour (unreadable in dark mode)', () => {
+    openCreatures();
+    const css = document.getElementById('mox-odds-styles').textContent;
+    expect(css).not.toContain('--bs-link-color');
+  });
 
   it('shows the Section, its count, the full form and the desired value', () => {
     openCreatures();

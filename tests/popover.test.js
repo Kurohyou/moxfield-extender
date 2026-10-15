@@ -13,6 +13,27 @@ function mousedown(target) {
   );
 }
 
+/**
+ * A DOMRect-shaped object.
+ * @param {number} top
+ * @param {number} left
+ * @param {number} width
+ * @param {number} height
+ * @returns {Object}
+ */
+function rect(top, left, width, height) {
+  return {
+    top,
+    left,
+    width,
+    height,
+    bottom: top + height,
+    right: left + width,
+    x: left,
+    y: top,
+  };
+}
+
 beforeEach(async () => {
   vi.resetModules();
   await import('../src/content/popover.js');
@@ -21,6 +42,10 @@ beforeEach(async () => {
   document.body.innerHTML =
     '<button id="anchor">open</button><p id="outside">x</p>';
   anchor = document.getElementById('anchor');
+  // jsdom has no layout; give the anchor a visible box by default.
+  vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(
+    rect(100, 500, 100, 20)
+  );
 });
 
 afterEach(() => {
@@ -138,9 +163,83 @@ describe('positioning', () => {
     expect(handle.el.style.left).toBe('200px');
     expect(handle.el.style.top).toBe('224px');
   });
+
+  it('follows the anchor on window scroll', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    const { el } = popover.open(anchor, () => {});
+    anchor.getBoundingClientRect.mockReturnValue(rect(40, 300, 100, 20));
+    window.dispatchEvent(new Event('scroll'));
+    expect(el.style.left).toBe('200px');
+    expect(el.style.top).toBe('64px');
+  });
+
+  it('follows the anchor when an inner element scrolls', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    const { el } = popover.open(anchor, () => {});
+    anchor.getBoundingClientRect.mockReturnValue(rect(40, 300, 100, 20));
+    // scroll does not bubble; the capture listener still sees it.
+    document.getElementById('outside').dispatchEvent(new Event('scroll'));
+    expect(el.style.top).toBe('64px');
+  });
+
+  it('re-positions on window resize', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    const { el } = popover.open(anchor, () => {});
+    Object.defineProperty(window, 'innerWidth', {
+      value: 500,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(el.style.left).toBe('292px');
+  });
+
+  it('stops following once closed', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    const handle = popover.open(anchor, () => {});
+    handle.close();
+    anchor.getBoundingClientRect.mockReturnValue(rect(40, 300, 100, 20));
+    window.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+    expect(handle.el.style.top).toBe('124px');
+  });
+
+  it('closes when the anchor is hidden on update()', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    const onClose = vi.fn();
+    const handle = popover.open(anchor, () => {}, { onClose });
+    anchor.getBoundingClientRect.mockReturnValue(rect(0, 0, 0, 0));
+    handle.update();
+    expect(popover.isOpen()).toBe(false);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes when the anchor is hidden on scroll', () => {
+    layout({ width: 200, height: 100 }, rect(100, 500, 100, 20));
+    popover.open(anchor, () => {});
+    anchor.getBoundingClientRect.mockReturnValue(rect(0, 0, 0, 0));
+    window.dispatchEvent(new Event('scroll'));
+    expect(popover.isOpen()).toBe(false);
+  });
+
+  it('opens even when the anchor has an empty rect', () => {
+    layout({ width: 200, height: 100 }, rect(0, 0, 0, 0));
+    popover.open(anchor, () => {});
+    expect(popover.isOpen()).toBe(true);
+  });
 });
 
 describe('popover.open', () => {
+  it('is a dialog with a default aria-label', () => {
+    const { el } = popover.open(anchor, () => {});
+    expect(el.getAttribute('role')).toBe('dialog');
+    expect(el.getAttribute('aria-label')).toBeTruthy();
+  });
+
+  it('takes its aria-label from the label option', () => {
+    const { el } = popover.open(anchor, () => {}, { label: 'Odds for X' });
+    expect(el.getAttribute('aria-label')).toBe('Odds for X');
+  });
+
   it('appends a fixed div.mox-popover[data-mox] to body and renders into it', () => {
     const handle = popover.open(anchor, (container) => {
       container.textContent = 'hello';
@@ -183,6 +282,33 @@ describe('popover.open', () => {
 });
 
 describe('closing', () => {
+  it('Esc stops propagation when it closes a popover', () => {
+    const seen = vi.fn();
+    document.body.addEventListener('keydown', seen);
+    popover.open(anchor, () => {});
+    const outside = document.getElementById('outside');
+    outside.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    expect(seen).not.toHaveBeenCalled();
+
+    outside.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    expect(seen).toHaveBeenCalledTimes(1);
+    document.body.removeEventListener('keydown', seen);
+  });
+
+  it('stays open when the anchor is removed and re-appended synchronously', async () => {
+    popover.open(anchor, () => {});
+    const parent = anchor.parentElement;
+    anchor.remove();
+    parent.appendChild(anchor);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(popover.isOpen()).toBe(true);
+  });
+
   it('closes on Esc', () => {
     const onClose = vi.fn();
     const handle = popover.open(anchor, () => {}, { onClose });
