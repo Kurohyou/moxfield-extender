@@ -6,12 +6,16 @@
   "scripts": {
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
+    "jsdom": "^30.1.2",
     "prettier": "^3.2.5",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "vitest": "^5.0.4"
   },
   "eslintConfig": {
     "env": {
