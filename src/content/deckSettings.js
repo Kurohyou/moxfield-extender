@@ -237,6 +237,17 @@
   }
 
   /**
+   * Whether the settings in memory are a loaded copy of this deck's. After a
+   * client-side deck change they still belong to the previous deck until
+   * ensureLoaded() runs for the new one, so writers check this first.
+   * @param {string|null} id - Deck ID
+   * @returns {boolean}
+   */
+  function isLoadedFor(id) {
+    return loaded && id !== null && id === deckId;
+  }
+
+  /**
    * Apply a deck value that arrived from chrome.storage.onChanged (another tab,
    * or our own write echoing back). Ignored while we have a write pending or in
    * flight, so an echo can't revert a newer change, and when it matches memory.
@@ -342,6 +353,7 @@
   window.MoxfieldExtended.deckSettings = {
     events,
     ensureLoaded,
+    isLoadedFor,
     get,
     setTurns,
     setDesired,

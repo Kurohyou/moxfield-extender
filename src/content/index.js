@@ -155,6 +155,22 @@ function initFeatures(settings) {
 }
 
 /**
+ * Load the per-deck settings for the deck on the page, when a deck view is
+ * shown. Its 'load' change event redraws the badge. Failures are logged.
+ */
+function loadDeckSettings() {
+  const { domHelpers, deckSettings } = window.MoxfieldExtended || {};
+  if (!deckSettings?.ensureLoaded || !domHelpers?.isDeckView()) return;
+  const warn = (error) =>
+    console.warn('[Moxfield Extended]', 'Could not load deck settings', error);
+  try {
+    Promise.resolve(deckSettings.ensureLoaded(domHelpers.getDeckId())).catch(warn);
+  } catch (error) {
+    warn(error);
+  }
+}
+
+/**
  * Refresh the Section header clusters, logging a failed refresh instead of
  * leaving an unhandled rejection.
  */
@@ -213,6 +229,11 @@ function setupMutationObserver() {
             window.MoxfieldExtended.priceVisualization.refresh();
           }
         }
+
+        // Follow a client-side deck change in the per-deck settings even with
+        // odds and curve off, so the badge shows this deck's T and ≥. A no-op
+        // once loaded; a load reads chrome.storage.local and never writes sync.
+        loadDeckSettings();
 
         // Section odds and mana curve. Moxfield navigates client-side and
         // this script runs once, so every refresh re-checks goldfish mode:

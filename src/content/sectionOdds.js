@@ -203,6 +203,27 @@
   }
 
   /**
+   * Whether deckSettings holds the deck in the URL, so an override write
+   * lands on it. Right after a client-side deck change it still holds the
+   * previous deck until the debounced refresh; then this starts loading the
+   * page's deck and returns false, and the caller drops the step.
+   * @returns {boolean}
+   */
+  function pageDeckLoaded() {
+    const { domHelpers, deckSettings } = ns();
+    const id = domHelpers.getDeckId();
+    if (deckSettings.isLoadedFor(id)) return true;
+    try {
+      Promise.resolve(deckSettings.ensureLoaded(id)).catch((error) =>
+        console.warn(LOG_PREFIX, 'Could not load deck settings', error)
+      );
+    } catch (error) {
+      console.warn(LOG_PREFIX, 'Could not load deck settings', error);
+    }
+    return false;
+  }
+
+  /**
    * The Section name of the header that holds an element.
    * @param {Element} el - Inside a Section header li
    * @returns {string|null}
@@ -245,6 +266,7 @@
      * @param {number} delta
      */
     function step(delta) {
+      if (!pageDeckLoaded()) return;
       const { domHelpers, deckSettings } = ns();
       const groupBy = domHelpers.getGroupBy();
       const next = Math.max(1, deckSettings.desiredFor(groupBy, name) + delta);
@@ -258,6 +280,7 @@
       .querySelector('.mox-stepper__inc')
       .addEventListener('click', () => step(1));
     root.querySelector('.mox-stepper__reset').addEventListener('click', () => {
+      if (!pageDeckLoaded()) return;
       const { domHelpers, deckSettings } = ns();
       deckSettings.setOverride(domHelpers.getGroupBy(), name, null);
     });
@@ -431,14 +454,18 @@
     const { state, domHelpers, deckSettings } = ns();
     if (!state?.settings?.sectionOddsEnabled) return;
 
+    // The key was meant for us either way. Drop it if the page's deck isn't
+    // the one in memory yet (a client-side deck change).
+    event.preventDefault();
+    event.stopPropagation();
+    if (!pageDeckLoaded()) return;
+
     const groupBy = domHelpers.getGroupBy();
     const next = Math.max(
       1,
       deckSettings.desiredFor(groupBy, hoveredName) + delta
     );
     deckSettings.setOverride(groupBy, hoveredName, next);
-    event.preventDefault();
-    event.stopPropagation();
   }
 
   /**

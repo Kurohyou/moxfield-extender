@@ -569,6 +569,124 @@ describe('content index Section odds wiring', () => {
     }
   });
 
+  /**
+   * Hover a Section header and press Alt+= on it.
+   * @param {string} title
+   * @returns {KeyboardEvent}
+   */
+  function altEqualsOver(title) {
+    header(title).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    const event = new KeyboardEvent('keydown', {
+      code: 'Equal',
+      key: '=',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    header(title).dispatchEvent(event);
+    return event;
+  }
+
+  /**
+   * The stored overrides of a deck, or undefined when nothing is stored.
+   * @param {string} id
+   * @returns {Promise<Object|undefined>}
+   */
+  async function storedOverrides(id) {
+    const stored = (await chrome.storage.local.get(`deck:${id}`))[`deck:${id}`];
+    return stored && stored.overrides;
+  }
+
+  it('does not write Alt+= into the previous deck right after a deck change', async () => {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+    );
+    await settle();
+    const { deckSettings } = window.MoxfieldExtended;
+
+    // Client-side move to xyz; the debounced refresh has not run yet.
+    window.history.pushState({}, '', '/decks/xyz');
+    const event = altEqualsOver('Creatures');
+
+    expect(event.defaultPrevented).toBe(true);
+    await settle();
+    await deckSettings.flush();
+    expect(deckSettings.isLoadedFor('xyz')).toBe(true);
+    expect(deckSettings.isOverridden('type', 'Creatures')).toBe(false);
+    expect(await storedOverrides('abc')).toBeUndefined();
+    expect(await storedOverrides('xyz')).toBeUndefined();
+  });
+
+  it('does not step the previous deck from an open stepper after a deck change', async () => {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+    );
+    await settle();
+    const { deckSettings, sectionOdds } = window.MoxfieldExtended;
+    sectionOdds.openStepper(
+      header('Creatures').querySelector('.mox-odds'),
+      'Creatures'
+    );
+    const inc = document.querySelector('.mox-stepper__inc');
+    expect(inc).not.toBeNull();
+
+    window.history.pushState({}, '', '/decks/xyz');
+    inc.click();
+    await settle();
+    await deckSettings.flush();
+
+    expect(deckSettings.isLoadedFor('xyz')).toBe(true);
+    expect(await storedOverrides('abc')).toBeUndefined();
+    expect(await storedOverrides('xyz')).toBeUndefined();
+  });
+
+  it('still writes Alt+= into the current deck', async () => {
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(header('Creatures').querySelector('.mox-odds')).not.toBeNull()
+    );
+    await settle();
+    const { deckSettings } = window.MoxfieldExtended;
+
+    altEqualsOver('Creatures');
+    await deckSettings.flush();
+
+    expect(deckSettings.desiredFor('type', 'Creatures')).toBe(2);
+    expect((await storedOverrides('abc')).type.Creatures).toBe(2);
+  });
+
+  it('re-keys the badge odds text on a deck change with odds and curve off', async () => {
+    await loadContent({
+      deck: true,
+      sync: {
+        sectionOddsEnabled: false,
+        sectionCurveEnabled: false,
+        priceVisualizationActive: true,
+      },
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector('.mox-badge')).not.toBeNull()
+    );
+    const odds = document.querySelector('.mox-badge [data-seg="odds"]');
+    expect(odds.classList.contains('mox-badge__seg--off')).toBe(true);
+    expect(odds.textContent).toContain('T3');
+
+    await chrome.storage.local.set({ 'deck:xyz': { turns: 6 } });
+    useFakeTimeouts();
+    window.history.pushState({}, '', '/decks/xyz');
+    buildStandardDeck();
+    await runObserverDebounce();
+
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('.mox-badge [data-seg="odds"]').textContent
+      ).toContain('T6')
+    );
+    expect(document.querySelector('.mox-cluster')).toBeNull();
+  });
+
   it('never writes chrome.storage.sync from initFeatures or a refresh', async () => {
     await loadContent({ deck: true });
     await settle();
