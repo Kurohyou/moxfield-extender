@@ -2,7 +2,7 @@
 
 Research for issue #3. It answers six questions about how Section odds can read the Library and per-Section quantities from a Moxfield deck page.
 
-Observed on 2026-10-14. Moxfield ships hashed CSS-module class names (`QplEGzdpUY3yofYwhhX0`, etc.), and these change whenever Moxfield rebuilds. Every selector here is a snapshot. Prefer the stable anchors noted below.
+Observed on 2026-10-14. Moxfield ships hashed CSS-module class names (`QplEGzdpUY3yofYwhhX0`, etc.), and these may change between builds. One counterexample: `li.XIi4jFys2lGhYwseGpBo` from the PRD's January 2025 snapshot is still live. Every selector here is a snapshot. Prefer `data-testid` and the structural anchors noted below.
 
 ## Sources
 
@@ -63,7 +63,7 @@ section.deckview
 - Option values (S1): `type`, `subType`, `tag` ("Type & Tags"), `color`, `colorIdentity`, `cmc` ("Mana Value"), `rarity`, `set`, `artist`, `none` ("No Grouping").
 - **Do not use `localStorage.state.viewSettings.groupBy`.** It stayed `type` while S1's view was `tag`/`cmc`/`none`, because logged-out changes are not persisted.
 - Default for users with no saved settings (S5): `{viewMode:"table", groupBy:"type", sortBy:"manaCost", useMana:true, usePrice:false, useSet:false}`.
-- The same select is the source for `#viewMode` and `#sortBy`.
+- The sibling selects `#viewMode` and `#sortBy` expose those settings the same way.
 
 ## Q4. Can a card appear in more than one Section?
 
@@ -141,7 +141,7 @@ Breakers: a Section collapsed by the user (not tested; the caret suggests rows m
 - `GET https://api2.moxfield.com/v3/decks/all/{publicId}` returned 200 from page context with no auth header. That covered S1 (public) and unlisted decks of the user (S2 and others).
 - `boards.mainboard.count` is the Library, with commanders already split out.
 - Each entry has `quantity`, `boardType` and `card.id`. `card.id` equals the row's `data-hash` (S1: Animar `L3nwN`). The entries map is keyed by `card.uniqueCardId`, which is **not** the `data-hash`.
-- `authorTags` maps card name → tags (array), which reproduces tag grouping.
+- `authorTags` maps card name → deck tags (array). It holds deck tags only. Tag Sections are also shaped by global tags and by the viewer's "Hide global tags / Disable global tags / Hide deck tags" options, which appeared on S2 and are passed into the tag grouping in S5. Reproducing tag Sections from JSON is therefore **unverified**. For example, S1's `Backup(2)` Section was not traced to `authorTags`. Reading per-Section `(n)` from the DOM avoids this problem.
 - **Not verified:** private decks (likely need the page's bearer token), API stability (it's undocumented), rate limits, and whether the JSON is stale after an owner edits a card in place without reload.
 
 **Recommendation:**
@@ -166,5 +166,6 @@ Breakers: a Section collapsed by the user (not tested; the caret suggests rows m
 - Group by `color`, `colorIdentity`, `rarity`, `set`, `artist`.
 - Collapsed Sections.
 - Private decks via the API.
+- Fetching the API from an extension content script. All fetches here ran in the page's main world. MV3 content scripts use the page origin for CORS, so they should behave the same, but this was not tested.
 - Tags named `Commander` / `Sideboard`.
 - Whether the DOM re-renders (and what changes) after owner edits. No edits were made.
