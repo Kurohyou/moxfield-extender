@@ -57,7 +57,7 @@ All three features are independent. The floating badge shows while **any** of th
   - `100%` only when certain; anything else that rounds to 100 shows `>99%`.
   - `0%` only when impossible; anything else that rounds to 0 shows `<1%`.
   - The tooltip follows the same rule.
-- An **override** (§2.5) is marked by a dotted underline on the chip.
+- An **override** (§2.5) is marked by a dotted underline on the chip. Either override, At least or By turn, shows it.
 
 ### 2.5 Settings
 
@@ -66,7 +66,7 @@ All three features are independent. The floating badge shows while **any** of th
 | Section odds on/off | on | **global** (`chrome.storage.sync`, like `priceVisualizationEnabled`) | — |
 | By turn (T) | 3 | per deck | T ≥ 0. No fixed maximum: the stepper stops once 7 + T ≥ Library |
 | At least (default desired) | 1 | per deck | ≥ 1 (0 is refused) |
-| Per-Section desired override | none | per **deck + Group-by mode + Section name** | ≥ 1 |
+| Per-Section overrides of At least and By turn | none | per **deck + Group-by mode + Section name** | At least ≥ 1. T ≥ 0, and the stepper stops once 7 + T ≥ Library |
 
 - The Group-by mode is read from `select#groupBy.value` (`type`, `subType`, `tag`, `color`, `colorIdentity`, `cmc`, `rarity`, `set`, `artist`, `none`), even when the dropdown is visually hidden.
 - **Orphaned overrides** (their Section no longer exists) are kept silently. They apply again if a Section with the same deck + mode + name comes back. No cleanup and no warning.
@@ -193,7 +193,9 @@ The badge appears while any feature is on, and is hidden in goldfish mode. It ha
 ### 5.3 Per-Section override stepper
 
 - **Right-click** a Section's `%` chip, or the curve while it's showing in a shared slot, to open a small stepper anchored there. The browser context menu is suppressed.
-  - The stepper shows the Section name, its card count, the full form (e.g. `7% ≥2 by T3`) and a "reset to default" link.
+  - The stepper shows the Section name, its card count and the full form with the Section's own values (e.g. `7% ≥2 by T5`).
+  - Two steppers: **At least**, and **By turn**, which shows the cards seen (e.g. `T5 · 12 cards seen`).
+  - One "Reset to deck defaults" link clears both overrides. It shows only while either is set.
   - **Left-click** on a standalone chip does nothing. In a shared slot, left-click switches (§4).
 - **Keyboard:** hover a Section and press **Alt+=** / **Alt+−**.
 
@@ -208,7 +210,7 @@ The popup gets **Section odds** and **Mana curve** toggles next to the existing 
 | Alt+P / Alt+Shift+P | Price bars on/off, and switch mode (existing) |
 | **Alt+O** | Section odds on/off |
 | **Alt+M** | Mana curve on/off |
-| **Alt+= / Alt+−** (while hovering a Section) | Raise or lower that Section's desired override |
+| **Alt+= / Alt+−** (while hovering a Section) | Raise or lower that Section's At least override. By turn has no shortcut |
 | Alt+2–4 (existing) | Section bulk actions |
 
 None of these collide with the extension's existing bindings. **Alt+O, Alt+M and Alt+=/− still need checking against Moxfield's own shortcuts** during implementation.
