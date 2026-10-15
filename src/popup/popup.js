@@ -19,6 +19,8 @@ const SETTING_IDS = [
   'sectionShortcutsEnabled',
   'priceVisualizationEnabled',
   'multiSelectEnabled',
+  'sectionOddsEnabled',
+  'sectionCurveEnabled',
 ];
 
 // Initialize popup
