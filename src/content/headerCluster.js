@@ -85,6 +85,18 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
   }
 
   /**
+   * An element's border-box width. offsetWidth exists only on HTML
+   * elements; an SVG child (Font Awesome's SVG mode turns the caret into an
+   * <svg>) has none, so it is read from its bounding box instead.
+   * @param {Element} el
+   * @returns {number}
+   */
+  function boxWidth(el) {
+    if (typeof el.offsetWidth === 'number') return el.offsetWidth;
+    return el.getBoundingClientRect().width || 0;
+  }
+
+  /**
    * An element's horizontal margins.
    * @param {CSSStyleDeclaration} style
    * @returns {number}
@@ -107,7 +119,8 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
    *
    * Summed from the anchor's own padding and border plus each rendered
    * child other than the name (type icon, "(n)", caret) with its margins,
-   * plus the name's margins. Not taken from the anchor's own width: with
+   * plus the name's margins, plus a flex or grid anchor's column-gap between
+   * those children. Not taken from the anchor's own width: with
    * min-width: 0 and overflow hidden it can be squeezed below its children,
    * and its scrollWidth reflects the name's truncated, not full, width, so
    * neither tells how much room the non-name parts really need. The
@@ -124,10 +137,16 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
       px(style.paddingRight) +
       px(style.borderLeftWidth) +
       px(style.borderRightWidth);
+    let laidOut = 0;
     for (const child of link.children) {
       if (!isRendered(child) && child !== name) continue;
+      laidOut += 1;
       const margins = marginsOf(getComputedStyle(child));
-      width += child === name ? margins : child.offsetWidth + margins;
+      width += child === name ? margins : boxWidth(child) + margins;
+    }
+    // column-gap applies only between the items of a flex or grid box.
+    if (/flex|grid/.test(style.display)) {
+      width += px(style.columnGap) * Math.max(0, laidOut - 1);
     }
     return width;
   }
@@ -157,7 +176,7 @@ ${HEADER} > :not(a.table-deck-row-link):not(.mox-cluster) {
         if (name) nameFull = name.scrollWidth;
         fixed += anchorFixedWidth(child, name) + margins;
       } else {
-        fixed += child.offsetWidth + margins;
+        fixed += boxWidth(child) + margins;
       }
     }
     return { available, fixed, nameFull };

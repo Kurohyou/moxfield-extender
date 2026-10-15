@@ -432,6 +432,103 @@ describe('refresh', () => {
     expect(cluster('Creatures').getAttribute('data-layout')).toBe('hidden');
   });
 
+  /**
+   * Swap Creatures' caret for a Font Awesome SVG-mode caret (an SVGElement,
+   * which has no offsetWidth) whose bounding box is `width` wide.
+   * @param {number} width
+   * @returns {SVGElement}
+   */
+  function svgCaret(width) {
+    const caret = header('Creatures').querySelector('.fas');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'svg-inline--fa fa-caret-down');
+    caret.replaceWith(svg);
+    const box = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+      function () {
+        return this === svg ? { width, height: 10 } : box.call(this);
+      }
+    );
+    return svg;
+  }
+
+  it('measures an SVG child of the anchor by its bounding box', async () => {
+    headerCluster.setMetricsForTests(null);
+    const svg = svgCaret(10);
+    let liWidth = 200;
+    // Same widths as the span caret: fixed 60, so 200 is shared (both
+    // needs 208). A NaN width would hide it; a 0 width would fit both.
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: liWidth };
+      if (el === svg) return { offset: 10 };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
+    headerCluster.cleanup();
+    headerCluster.init();
+    liWidth = 208;
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
+  });
+
+  it('measures an SVG sibling of the anchor by its bounding box', async () => {
+    headerCluster.setMetricsForTests(null);
+    // A 40 px icon after the anchor: fixed 100, so the shared slot needs
+    // 100 + 28 + 30 + 6 = 164.
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    header('Creatures').appendChild(svg);
+    const box = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+      function () {
+        return this === svg ? { width: 40, height: 10 } : box.call(this);
+      }
+    );
+    let liWidth = 164;
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: liWidth };
+      if (el === svg) return { offset: 40 };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
+    liWidth = 163;
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('hidden');
+  });
+
+  it('adds a flex anchor’s column-gap between its rendered children', async () => {
+    headerCluster.setMetricsForTests(null);
+    // Four children (icon, name, count, caret) with a 4 px gap add 12:
+    // fixed 72, so both needs 72 + 80 + 30 + 24 + 12 + 2 = 220.
+    const link = header('Creatures').querySelector('a.table-deck-row-link');
+    link.style.display = 'inline-flex';
+    link.style.columnGap = '4px';
+    let liWidth = 220;
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: liWidth };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
+    liWidth = 219;
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('shared');
+  });
+
+  it('ignores column-gap on an anchor that is not a flex or grid box', async () => {
+    headerCluster.setMetricsForTests(null);
+    const link = header('Creatures').querySelector('a.table-deck-row-link');
+    link.style.display = 'inline';
+    link.style.columnGap = '4px';
+    stubLayout((el) => {
+      if (el.matches(HEADER_LI)) return { client: 208 };
+      return anchorWidths(el);
+    });
+    await headerCluster.refresh();
+    expect(cluster('Creatures').getAttribute('data-layout')).toBe('both');
+  });
+
   it('skips layout for a header with no box', async () => {
     headerCluster.setMetricsForTests({ ...metrics, header: () => null });
     await headerCluster.refresh();
