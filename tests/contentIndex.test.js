@@ -333,7 +333,24 @@ describe('content index Section odds wiring', () => {
     expect(document.querySelector('.mox-cluster')).toBeNull();
   });
 
-  it('does not feed on its own rendering', async () => {
+  it('schedules no refresh after the initial render (manual check 7)', async () => {
+    // Fake timeouts from the start, so a debounce scheduled by the initial
+    // render itself would be a fake timer this test can run.
+    useFakeTimeouts();
+    await loadContent({ deck: true });
+    await vi.waitFor(() =>
+      expect(document.querySelector('.mox-cluster')).not.toBeNull()
+    );
+    expect(document.querySelector('.mox-badge')).not.toBeNull();
+    const refresh = vi.spyOn(window.MoxfieldExtended.headerCluster, 'refresh');
+
+    await vi.advanceTimersByTimeAsync(10000);
+
+    expect(observerRefreshes()).toBe(0);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('does not feed on the refresh a foreign change causes', async () => {
     await loadContent({ deck: true });
     await vi.waitFor(() =>
       expect(document.querySelector('.mox-cluster')).not.toBeNull()
