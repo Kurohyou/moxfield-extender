@@ -23,6 +23,14 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
   const TOGGLE_KEY = 'p'; // Alt+P toggles on/off, Alt+Shift+P switches mode
 
   /**
+   * Check if running in goldfish mode
+   * @returns {boolean} True if in goldfish mode
+   */
+  function isGoldfishMode() {
+    return window.location.pathname.endsWith('/goldfish');
+  }
+
+  /**
    * Get the current deck ID from the URL
    * @returns {string|null} Deck ID or null if not on a deck page
    */
@@ -123,10 +131,16 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     // Check if visualization was previously active and restore state
     loadActiveState().then((state) => {
       if (state.active) {
-        isDeckWideMode = state.deckWide || false;
-        applyVisualization();
-        showIndicator();
         isActive = true;
+        isDeckWideMode = state.deckWide || false;
+
+        // Only apply if not in goldfish mode
+        if (!isGoldfishMode()) {
+          applyVisualization();
+          showIndicator();
+        } else {
+          console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
+        }
       }
     });
 
@@ -177,8 +191,12 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     console.log(LOG_PREFIX, `Price visualization: ${isActive ? 'ON' : 'OFF'} (${isDeckWideMode ? 'deck-wide' : 'per-section'})`);
 
     if (isActive) {
-      applyVisualization();
-      showIndicator();
+      if (!isGoldfishMode()) {
+        applyVisualization();
+        showIndicator();
+      } else {
+        console.log(LOG_PREFIX, 'Price visualization active but hidden in goldfish mode');
+      }
     } else {
       removeVisualization();
       hideIndicator();
@@ -206,8 +224,10 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
 
       isDeckWideMode = true;
       isActive = true;
-      applyVisualization();
-      showIndicator();
+      if (!isGoldfishMode()) {
+        applyVisualization();
+        showIndicator();
+      }
       saveActiveState(isActive, isDeckWideMode);
       console.log(LOG_PREFIX, 'Price visualization: ON (deck-wide)');
       return;
@@ -218,8 +238,10 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     console.log(LOG_PREFIX, `Price visualization mode: ${isDeckWideMode ? 'deck-wide' : 'per-section'}`);
 
     // Re-apply with new mode
-    applyVisualization();
-    showIndicator();
+    if (!isGoldfishMode()) {
+      applyVisualization();
+      showIndicator();
+    }
 
     // Persist state
     saveActiveState(isActive, isDeckWideMode);
@@ -232,7 +254,14 @@ console.log('[Moxfield Extended] priceVisualization.js loaded');
     if (!isInitialized || !isActive) return;
 
     // Re-apply visualization to catch new/updated cards
-    applyVisualization();
+    // Re-apply visualization to catch new/updated cards
+    if (isGoldfishMode()) {
+      removeVisualization();
+      hideIndicator();
+    } else {
+      applyVisualization();
+      showIndicator();
+    }
   }
 
   /**
