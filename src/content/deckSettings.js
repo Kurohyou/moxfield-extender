@@ -18,6 +18,8 @@
   let settings = defaults();
   let snapshot = null; // frozen copy handed out by get(); rebuilt after a change
   let loading = null; // { id, promise } while a load is in flight
+  let loadSeq = 0; // bumped per load; a load applies only if it is still the latest
+  let lastNotifiedFp = fingerprint(settings); // what listeners last saw
   let timer = null;
   let dirty = false; // memory is newer than storage
   let inFlight = 0; // writes handed to chrome.storage.local, not yet settled
@@ -130,6 +132,7 @@
    */
   function notify(source) {
     snapshot = null;
+    lastNotifiedFp = fingerprint(settings);
     events.dispatchEvent(new CustomEvent('change', { detail: { source } }));
   }
 
@@ -203,23 +206,29 @@
     if (loading && loading.id === id) return loading.promise;
 
     flush();
-    const before = fingerprint(settings);
+    const seq = ++loadSeq;
     deckId = id;
     loaded = false;
     settings = defaults();
+    snapshot = null;
 
     const promise = Promise.resolve()
       .then(() => chrome.storage.local.get(`deck:${id}`))
-      .catch((error) => {
-        console.warn(LOG_PREFIX, 'Could not load deck settings', error);
-        return {};
-      })
-      .then((stored) => {
-        if (deckId !== id) return get(); // superseded by a newer deck
+      .then(
+        (stored) => ({ stored }),
+        (error) => ({ error })
+      )
+      .then(({ stored, error }) => {
+        if (seq !== loadSeq) return get(); // superseded by a newer load
         loading = null;
+        if (error) {
+          // Stay unloaded: setters remain no-ops and the next call retries.
+          console.warn(LOG_PREFIX, 'Could not load deck settings', error);
+          return get();
+        }
         loaded = true;
         settings = sanitize(stored[`deck:${id}`]);
-        if (fingerprint(settings) !== before) notify('load');
+        if (fingerprint(settings) !== lastNotifiedFp) notify('load');
         return get();
       });
     loading = { id, promise };
@@ -328,20 +337,18 @@
   window.addEventListener('pagehide', flush);
 
   // Export for use in content scripts
-  if (typeof window !== 'undefined') {
-    window.MoxfieldExtended = window.MoxfieldExtended || {};
-    window.MoxfieldExtended.deckSettings = {
-      events,
-      ensureLoaded,
-      get,
-      setTurns,
-      setDesired,
-      setSharedSlot,
-      desiredFor,
-      isOverridden,
-      setOverride,
-      applyExternal,
-      flush,
-    };
-  }
+  window.MoxfieldExtended = window.MoxfieldExtended || {};
+  window.MoxfieldExtended.deckSettings = {
+    events,
+    ensureLoaded,
+    get,
+    setTurns,
+    setDesired,
+    setSharedSlot,
+    desiredFor,
+    isOverridden,
+    setOverride,
+    applyExternal,
+    flush,
+  };
 })();

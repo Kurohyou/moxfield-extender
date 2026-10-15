@@ -42,6 +42,36 @@
     return false;
   });
 
+  /**
+   * React to chrome.storage changes.
+   * - sync: known setting keys are merged into state.settings and features re-run
+   *   (initFeatures is idempotent: each init/cleanup checks its own state).
+   * - local: a change to the current deck's key goes to deckSettings.applyExternal.
+   * @param {Object} changes - Map of key to { oldValue, newValue }
+   * @param {string} area - 'sync' | 'local' | 'managed'
+   */
+  function handleStorageChanged(changes, area) {
+    const { state, storage, domHelpers, deckSettings } = window.MoxfieldExtended;
+
+    if (area === 'sync') {
+      const known = new Set([...Object.keys(storage.DEFAULT_SETTINGS), 'priceVisualizationDeckWide']);
+      const updates = {};
+      Object.keys(changes).forEach((key) => {
+        if (!known.has(key)) return;
+        // A removed key (no newValue) falls back to its default.
+        updates[key] = 'newValue' in changes[key] ? changes[key].newValue : storage.DEFAULT_SETTINGS[key];
+      });
+      if (Object.keys(updates).length > 0) {
+        Object.assign(state.settings, updates);
+        initFeatures(state.settings);
+      }
+    } else if (area === 'local') {
+      const deckId = domHelpers.getDeckId();
+      const change = deckId && changes[`deck:${deckId}`];
+      if (change) deckSettings?.applyExternal(deckId, change.newValue);
+    }
+  }
+
   // Keep popup, badge and other tabs in step through storage
   chrome.storage.onChanged.addListener(handleStorageChanged);
 
@@ -57,36 +87,6 @@
   console.log(LOG_PREFIX, `Found ${headers.length} section headers`);
   console.log(LOG_PREFIX, 'Price data enabled:', window.MoxfieldExtended.domHelpers.isPriceEnabled());
 })();
-
-/**
- * React to chrome.storage changes.
- * - sync: known setting keys are merged into state.settings and features re-run
- *   (initFeatures is idempotent: each init/cleanup checks its own state).
- * - local: a change to the current deck's key goes to deckSettings.applyExternal.
- * @param {Object} changes - Map of key to { oldValue, newValue }
- * @param {string} area - 'sync' | 'local' | 'managed'
- */
-function handleStorageChanged(changes, area) {
-  const { state, storage, domHelpers, deckSettings } = window.MoxfieldExtended;
-
-  if (area === 'sync') {
-    const known = new Set([...Object.keys(storage.DEFAULT_SETTINGS), 'priceVisualizationDeckWide']);
-    const updates = {};
-    Object.keys(changes).forEach((key) => {
-      if (!known.has(key)) return;
-      // A removed key (no newValue) falls back to its default.
-      updates[key] = 'newValue' in changes[key] ? changes[key].newValue : storage.DEFAULT_SETTINGS[key];
-    });
-    if (Object.keys(updates).length > 0) {
-      Object.assign(state.settings, updates);
-      initFeatures(state.settings);
-    }
-  } else if (area === 'local') {
-    const deckId = domHelpers.getDeckId();
-    const change = deckId && changes[`deck:${deckId}`];
-    if (change) deckSettings?.applyExternal(deckId, change.newValue);
-  }
-}
 
 /**
  * Initialize features based on settings

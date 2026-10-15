@@ -60,11 +60,9 @@ describe('defaults', () => {
     ds.setOverride('type', 'Creatures', 2);
     const copy = ds.get();
     expect(() => {
-      'use strict';
       copy.turns = 99;
     }).toThrow(TypeError);
     expect(() => {
-      'use strict';
       copy.overrides.type.Creatures = 99;
     }).toThrow(TypeError);
     expect(ds.get().turns).toBe(3);
@@ -428,6 +426,78 @@ describe('ensureLoaded', () => {
     const second = ds.ensureLoaded('b');
     await Promise.all([first, second]);
     expect(ds.get().turns).toBe(2);
+  });
+
+  it('a stale load of the same deck never overwrites a later edit (A to B to A)', async () => {
+    const real = chrome.storage.local.get.bind(chrome.storage.local);
+    const pending = [];
+    vi.spyOn(chrome.storage.local, 'get').mockImplementation((key) => {
+      return new Promise((resolve) => {
+        pending.push(() => real(key).then(resolve));
+      });
+    });
+    await chrome.storage.local.set({
+      [KEY('a')]: { turns: 1 },
+      [KEY('b')]: { turns: 2 },
+    });
+
+    const firstA = ds.ensureLoaded('a');
+    const b = ds.ensureLoaded('b');
+    const secondA = ds.ensureLoaded('a');
+    await Promise.resolve(); // let the three get() calls start
+    expect(pending).toHaveLength(3);
+
+    pending[2](); // the latest load of A settles first
+    await secondA;
+    expect(ds.get().turns).toBe(1);
+    ds.setTurns(7);
+
+    pending[0](); // the stale load of A settles late
+    pending[1]();
+    await Promise.all([firstA, b]);
+    expect(ds.get().turns).toBe(7);
+  });
+
+  it('a failed load stays unloaded, keeps setters inert and retries next call', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await chrome.storage.local.set({ [KEY('a')]: { turns: 6 } });
+    const get = vi
+      .spyOn(chrome.storage.local, 'get')
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockImplementationOnce(() => {
+        throw new Error('sync boom');
+      });
+    const set = vi.spyOn(chrome.storage.local, 'set');
+
+    expect((await ds.ensureLoaded('a')).turns).toBe(3);
+    ds.setTurns(9);
+    expect(ds.get().turns).toBe(3);
+    expect((await ds.ensureLoaded('a')).turns).toBe(3);
+    expect(get).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE);
+    expect(set).not.toHaveBeenCalled();
+
+    expect((await ds.ensureLoaded('a')).turns).toBe(6);
+    ds.setTurns(9);
+    expect(ds.get().turns).toBe(9);
+  });
+
+  it('still notifies when a pending deck is replaced by one equal to the defaults', async () => {
+    await chrome.storage.local.set({ [KEY('a')]: { turns: 5 } });
+    await ds.ensureLoaded('a');
+    const sources = recordChanges();
+
+    const real = chrome.storage.local.get.bind(chrome.storage.local);
+    vi.spyOn(chrome.storage.local, 'get').mockImplementationOnce(
+      () => new Promise(() => {})
+    );
+    void ds.ensureLoaded('b'); // never settles
+    vi.spyOn(chrome.storage.local, 'get').mockImplementation(real);
+    await ds.ensureLoaded('c');
+
+    expect(ds.get().turns).toBe(3);
+    expect(sources).toEqual(['load']);
   });
 
   it('ignores setters until the deck has loaded', async () => {
