@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   sectionShortcutsEnabled: true,
   priceVisualizationEnabled: true,
   multiSelectEnabled: true,
+  sectionOddsEnabled: true,
+  sectionCurveEnabled: true,
   priceVisualizationActive: false, // Current toggle state (not a feature toggle)
   colorScheme: 'blue-red',
 };
