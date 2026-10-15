@@ -21,7 +21,8 @@
   // Badge segment to the global toggle a left-click flips.
   const SEG_TOGGLES = { odds: 'sectionOddsEnabled', curve: 'sectionCurveEnabled' };
   const SEGMENTS = ['price', 'odds', 'curve'];
-  const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+  // Keys that activate a focused segment, like a native button.
+  const ACTIVATE_KEYS = new Set(['Enter', ' ']);
 
   const CSS = `
 .mox-badge {
@@ -118,17 +119,21 @@
     root = document.createElement('div');
     root.className = 'mox-badge';
     root.setAttribute('data-mox', '');
+    root.setAttribute('role', 'toolbar');
     root.setAttribute('aria-label', 'Moxfield Extended');
     segs = {};
     SEGMENTS.forEach((name) => {
       const span = document.createElement('span');
       span.className = 'mox-badge__seg';
       span.dataset.seg = name;
+      span.setAttribute('role', 'button');
+      span.setAttribute('tabindex', '0');
       root.appendChild(span);
       segs[name] = span;
     });
     root.addEventListener('click', onClick);
     root.addEventListener('contextmenu', onContextMenu);
+    root.addEventListener('keydown', onSegmentKeydown);
     return root;
   }
 
@@ -185,15 +190,21 @@
    * Text, struck state and title of the price segment.
    * @param {{active: boolean, deckWide: boolean, budget: number|null}} state
    * @param {boolean} available - The viewer's Moxfield Price option is on
-   * @returns {{text: string, off: boolean, title: string}}
+   * @returns {{text: string, label: string, off: boolean, title: string}}
    */
   function priceView(state, available) {
     if (!available) {
-      return { text: '📊 Price', off: true, title: `${PRICE_HINT} · ${RIGHT_CLICK}` };
+      return {
+        text: '📊 Price',
+        label: `Price bars: unavailable. ${PRICE_HINT}`,
+        off: true,
+        title: `${PRICE_HINT} · ${RIGHT_CLICK}`,
+      };
     }
     if (!state.active) {
       return {
         text: '📊 Price',
+        label: 'Price bars: off',
         off: true,
         title: `Price bars: off · Click: Section % · Alt+P · ${RIGHT_CLICK}`,
       };
@@ -201,6 +212,7 @@
     if (!state.deckWide) {
       return {
         text: '📊 Section %',
+        label: 'Price bars: Section %',
         off: false,
         title: `Price bars: share of each Section's cost · Click: Deck % · ${RIGHT_CLICK}`,
       };
@@ -209,12 +221,14 @@
       const budget = state.budget.toFixed(0);
       return {
         text: `📊 Budget $${budget}`,
+        label: `Price bars: Budget $${budget}`,
         off: false,
         title: `Price bars: share of a $${budget} budget · Click: off · ${RIGHT_CLICK}`,
       };
     }
     return {
       text: '📊 Deck %',
+      label: 'Price bars: Deck %',
       off: false,
       title: `Price bars: share of the deck's cost · Click: off · ${RIGHT_CLICK}`,
     };
@@ -223,9 +237,11 @@
   /**
    * Draw the badge from current state. Idempotent: writes only what changed,
    * so a second render with nothing new makes no DOM mutations. Removes the
-   * badge in goldfish mode or when every feature is off.
+   * badge in goldfish mode or when every feature is off. Does nothing before
+   * init() or after cleanup().
    */
   function render() {
+    if (!initialized) return;
     const { domHelpers, priceVisualization, deckSettings } = ns();
     if (!domHelpers) return;
 
@@ -257,6 +273,7 @@
       const view = priceView(price, available);
       setText(segs.price, view.text);
       setTitle(segs.price, view.title);
+      setAttr(segs.price, 'aria-label', view.label);
       setClass(segs.price, OFF_CLASS, view.off);
       setAttr(segs.price, 'aria-disabled', available ? null : 'true');
     }
@@ -270,6 +287,7 @@
         : `Section odds: off · Click: on · Alt+O · ${RIGHT_CLICK}`
     );
     setClass(segs.odds, OFF_CLASS, !oddsOn);
+    setAttr(segs.odds, 'aria-pressed', String(oddsOn));
 
     setText(segs.curve, '📈 Curve');
     setTitle(
@@ -279,6 +297,7 @@
         : `Mana curve: off · Click: on · Alt+M · ${RIGHT_CLICK}`
     );
     setClass(segs.curve, OFF_CLASS, !curveOn);
+    setAttr(segs.curve, 'aria-pressed', String(curveOn));
 
     if (!root.isConnected) document.body.appendChild(root);
   }
@@ -286,7 +305,8 @@
   /**
    * Flip a global feature toggle. Updates state.settings at once and redraws,
    * then writes chrome.storage.sync; index.js's onChanged listener merges the
-   * same value and re-runs initFeatures, as for the popup.
+   * same value and re-runs initFeatures, as for the popup. A failed write
+   * (e.g. the sync quota) rolls the optimistic value back and redraws.
    * @param {string} key - A storage.DEFAULT_SETTINGS key
    */
   function toggleSetting(key) {
@@ -296,20 +316,18 @@
     render();
     Promise.resolve(storage?.setSetting(key, next)).catch((error) => {
       console.warn(LOG_PREFIX, `Couldn't save ${key}`, error);
+      const settings = ns().state?.settings;
+      // Leave it alone if something has changed it again since.
+      if (settings && settings[key] === next) settings[key] = !next;
+      render();
     });
   }
 
   /**
-   * Left-click on a segment: cycle price bars, or flip odds or curve.
-   * Never reaches the page.
-   * @param {MouseEvent} event
+   * Run a segment's action: cycle price bars, or flip odds or curve.
+   * @param {HTMLElement} seg - A [data-seg] span
    */
-  function onClick(event) {
-    event.stopPropagation();
-    if (event.button !== 0) return;
-    const seg = event.target?.closest?.('[data-seg]');
-    if (!seg) return;
-
+  function activate(seg) {
     const name = seg.dataset.seg;
     if (name === 'price') {
       // cycle() does nothing while Moxfield Price is off: the segment is inert.
@@ -318,6 +336,32 @@
     } else if (SEG_TOGGLES[name]) {
       toggleSetting(SEG_TOGGLES[name]);
     }
+  }
+
+  /**
+   * Left-click on a segment runs its action. Never reaches the page.
+   * @param {MouseEvent} event
+   */
+  function onClick(event) {
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    const seg = event.target?.closest?.('[data-seg]');
+    if (seg) activate(seg);
+  }
+
+  /**
+   * Enter or Space on a focused segment acts like a click. Never reaches the
+   * page; autorepeats are swallowed.
+   * @param {KeyboardEvent} event
+   */
+  function onSegmentKeydown(event) {
+    if (!ACTIVATE_KEYS.has(event.key)) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const seg = event.target?.closest?.('[data-seg]');
+    if (!seg) return;
+    event.preventDefault(); // Space would scroll the page
+    event.stopPropagation();
+    if (!event.repeat) activate(seg);
   }
 
   /**
@@ -332,16 +376,6 @@
   }
 
   /**
-   * Whether keys typed at this target are text input.
-   * @param {EventTarget} target
-   * @returns {boolean}
-   */
-  function isEditable(target) {
-    if (!target || target.nodeType !== Node.ELEMENT_NODE) return false;
-    return Boolean(target.isContentEditable || target.closest(EDITABLE));
-  }
-
-  /**
    * Alt+O / Alt+M (no Ctrl, Meta or Shift): flip Section odds / mana curve.
    * Matches event.code. Ignored in editable fields; autorepeats are swallowed.
    * @param {KeyboardEvent} event
@@ -351,7 +385,7 @@
     if (!key || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
       return;
     }
-    if (isEditable(event.target)) return;
+    if (ns().domHelpers?.isEditableTarget(event.target)) return;
 
     event.preventDefault();
     event.stopPropagation();

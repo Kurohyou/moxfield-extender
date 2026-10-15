@@ -369,6 +369,94 @@ describe('odds and curve segments', () => {
   });
 });
 
+describe('failed sync writes', () => {
+  it('roll the optimistic toggle back and redraw', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    chrome.storage.sync.__failNextWrite();
+    mouse(seg('odds'), 'click');
+    expect(struck('odds')).toBe(true); // optimistic
+    await settle();
+    expect(window.MoxfieldExtended.state.settings.sectionOddsEnabled).toBe(
+      true
+    );
+    expect(struck('odds')).toBe(false);
+    expect(seg('odds').getAttribute('aria-pressed')).toBe('true');
+    expect(await synced(['sectionOddsEnabled'])).toEqual({});
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('roll back an Alt+M toggle too', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    chrome.storage.sync.__failNextWrite();
+    key(document.body, ALT_M);
+    await settle();
+    expect(window.MoxfieldExtended.state.settings.sectionCurveEnabled).toBe(
+      true
+    );
+    expect(struck('curve')).toBe(false);
+  });
+});
+
+describe('accessibility', () => {
+  it('is a labelled toolbar of focusable buttons', () => {
+    expect(root().getAttribute('role')).toBe('toolbar');
+    expect(root().getAttribute('aria-label')).toBeTruthy();
+    ['price', 'odds', 'curve'].forEach((name) => {
+      expect(seg(name).getAttribute('role')).toBe('button');
+      expect(seg(name).getAttribute('tabindex')).toBe('0');
+    });
+  });
+
+  it('marks odds and curve with aria-pressed', () => {
+    expect(seg('odds').getAttribute('aria-pressed')).toBe('true');
+    expect(seg('curve').getAttribute('aria-pressed')).toBe('true');
+    price.setActive(true);
+    mouse(seg('odds'), 'click');
+    expect(seg('odds').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('labels the price segment with its mode', () => {
+    expect(seg('price').getAttribute('aria-label')).toBe('Price bars: off');
+    price.setActive(true);
+    expect(seg('price').getAttribute('aria-label')).toBe(
+      'Price bars: Section %'
+    );
+    price.setDeckWide(true);
+    expect(seg('price').getAttribute('aria-label')).toBe('Price bars: Deck %');
+    price.setBudgetGoal(75);
+    expect(seg('price').getAttribute('aria-label')).toBe(
+      'Price bars: Budget $75'
+    );
+  });
+
+  it.each([
+    ['Enter', 'Enter'],
+    ['Space', ' '],
+  ])('%s on a segment acts like a click', (_name, keyName) => {
+    const event = key(seg('price'), { key: keyName, code: _name });
+    expect(event.defaultPrevented).toBe(true);
+    expect(price.getState().active).toBe(true);
+    key(seg('curve'), { key: keyName, code: _name });
+    expect(struck('curve')).toBe(true);
+  });
+
+  it('ignores a held Enter after the first press', () => {
+    key(seg('price'), { key: 'Enter', code: 'Enter' });
+    key(seg('price'), { key: 'Enter', code: 'Enter', repeat: true });
+    expect(price.getState().deckWide).toBe(false);
+  });
+
+  it('keeps an inert price segment focusable but does nothing on Enter', () => {
+    build(false);
+    badge.render();
+    expect(seg('price').getAttribute('tabindex')).toBe('0');
+    expect(seg('price').getAttribute('aria-disabled')).toBe('true');
+    expect(seg('price').getAttribute('aria-label')).toMatch(/unavailable/);
+    key(seg('price'), { key: 'Enter', code: 'Enter' });
+    expect(price.getState().active).toBe(false);
+  });
+});
+
 describe('right-click', () => {
   it('suppresses the menu and toggles the settings popover on the badge', () => {
     const toggle = vi.fn();
@@ -560,6 +648,19 @@ describe('render', () => {
     badge.render();
     const records = await recordMutations(() => badge.render());
     expect(records).toHaveLength(0);
+  });
+
+  it('does nothing after cleanup', () => {
+    badge.cleanup();
+    badge.render();
+    expect(root()).toBeNull();
+    expect(document.getElementById('mox-badge-styles')).toBeNull();
+  });
+
+  it('does nothing on a deck settings change after cleanup', () => {
+    badge.cleanup();
+    deckSettings.setTurns(6);
+    expect(root()).toBeNull();
   });
 
   it('works with no price module loaded', () => {
